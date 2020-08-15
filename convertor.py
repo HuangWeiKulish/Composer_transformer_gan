@@ -8,8 +8,6 @@ import pickle as pkl
 from scipy import sparse
 
 
-# Todo: encode 0 as 'x' rather than '' !!!
-
 class Conversion:
 
     @staticmethod
@@ -144,7 +142,7 @@ class DataPreparation:
     def token_encode(notes_i):
         # notes_i is 1d array (88,), with values represent note id
         result = '_'.join(notes_i[notes_i != 0].astype(str))
-        return result if result != 'p' else 'p'  # 'p' for pause
+        return result if result != '' else 'p'  # 'p' for pause
 
     @staticmethod
     def token_decode(str_i):
@@ -193,17 +191,15 @@ class DataPreparation:
                             filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['noct']):
         all_file_names = DataPreparation.get_all_filenames(
             filepath_list=filepath_list, name_substr_list=name_substr_list)
-        x_train, x_test = [], []
+        x_in, x_tar = [], []
         for filepath in all_file_names:
-            file = pkl.load(open(filepath, 'rb')).toarray()  # file.shape = (length, 88)
-            file = np.where(file > 0, 1, 0)  # change to binary
-            ary = DataPreparation.get_melody_array(file)  # array (length_original, 2)
+            ary = pkl.load(open(filepath, 'rb'))  # file.shape = (length, 2)
             length = in_seq_len+out_seq_len
             ary = DataPreparation.cut_array(ary, length, step, int(step/3))  # (n_samples, length, 2)
             ary = np.array(ary, dtype=object)
-            x_train += ary[:, :in_seq_len, :].tolist()
-            x_test += ary[:, in_seq_len:, :].tolist()
-        return np.array(x_train, dtype=object), np.array(x_test, dtype=object)
+            x_in += ary[:, :in_seq_len, :].tolist()
+            x_tar += ary[:, in_seq_len:, :].tolist()
+        return np.array(x_in, dtype=object), np.array(x_tar, dtype=object)
 
 
 def process_midi(midifile_path='/Users/Wei/Desktop/piano_classic/Chopin',
@@ -214,6 +210,7 @@ def process_midi(midifile_path='/Users/Wei/Desktop/piano_classic/Chopin',
             try:
                 mid = mido.MidiFile(mid_name, clip=True)
                 mid_array = Conversion.mid2arry(mid)
+                mid_array = np.where(mid_array > 0, 1, 0)  # change to binary
                 mid_converted = sparse.csr_matrix(mid_array) if to_sparse \
                     else DataPreparation.get_melody_array(mid_array)
                 pkl.dump(mid_converted,
@@ -222,10 +219,35 @@ def process_midi(midifile_path='/Users/Wei/Desktop/piano_classic/Chopin',
                 pass
             print(i)
 
+
+
+
+
 """
 process_midi(midifile_path='/Users/Wei/Desktop/piano_classic/Chopin',
              save_path='/Users/Wei/Desktop/piano_classic/Chopin_array', to_sparse=False)
+             
 tmp = pkl.load(open('/Users/Wei/Desktop/piano_classic/Chopin_array/valse_70_3_(c)dery.pkl', 'rb'))
+np.where(tmp=='p')
+
+length = in_seq_len+out_seq_len
+ary = DataPreparation.cut_array(tmp, length, step, int(step/3))  # (n_samples, length, 2)
+ary = np.array(ary, dtype=object)
+x_train = ary[:, :in_seq_len, :]
+x_test = ary[:, in_seq_len:, :]
+
+
+
+
+file = pkl.load(open(filepath, 'rb')).toarray()  # file.shape = (length, 88)
+file = np.where(file > 0, 1, 0)  # change to binary
+ary = DataPreparation.get_melody_array(file)  # array (length_original, 2)
+length = in_seq_len+out_seq_len
+ary = DataPreparation.cut_array(ary, length, step, int(step/3))  # (n_samples, length, 2)
+ary = np.array(ary, dtype=object)
+x_train += ary[:, :in_seq_len, :].tolist()
+x_test += ary[:, in_seq_len:, :].tolist()
+train_data = DataPreparation.
 """
 
 
