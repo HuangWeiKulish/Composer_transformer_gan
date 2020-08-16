@@ -1,8 +1,11 @@
 import numpy as np
+import os
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from convertor import DataPreparation
-import pickle as pkl
+from Side_Project.Composer.transformer_gan import convertor
+
+tf.keras.backend.set_floatx('float32')
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
 def latant_vector(n_samples, input_dim, mean_=0.0, std_=1.1):
@@ -18,13 +21,18 @@ def load_existing_model(model, load_model_path_name, load_trainable, loss_func):
     return model
 
 
-def loss_func(real, pred_melody, pred_duration, cross_entropy):
-    loss_ = cross_entropy(real, pred)
-
+def loss_func_notes(real, pred):
+    cross_entropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
     mask = tf.math.logical_not(tf.math.equal(real, 0))
-    mask = tf.cast(mask, dtype=loss_.dtype)
-    loss_ *= mask
-    return tf.reduce_sum(loss_) / tf.reduce_sum(mask)
+    mask = tf.cast(mask, dtype=tf.float32)
+    loss_ = cross_entropy(real, pred)
+    loss_ *= mask  # (batch, out_seq_len)
+    return tf.reduce_sum(loss_) / tf.reduce_sum(mask)  # scalar
+
+
+def loss_func_duration(real, pred):
+    loss_ = tf.keras.losses.MSE(real, pred)
+    return tf.reduce_sum(loss_) / (real.shape[0] * real.shape[1])
 
 
 def padding_mask(x_):
@@ -56,7 +64,7 @@ def number_encode_text(x, tk, dur_denorm=20):
 def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, dur_denorm=20,
                    filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['']):
     # tk = tf.keras.preprocessing.text.Tokenizer(filters='')
-    x_in, x_tar = DataPreparation.batch_preprocessing(in_seq_len, out_seq_len-1, step, filepath_list, name_substr_list)
+    x_in, x_tar = convertor.DataPreparation.batch_preprocessing(in_seq_len, out_seq_len-1, step, filepath_list, name_substr_list)
     batch = x_in.shape[0]
     # append '<start>' in front and '<end>' at the end
     x_tar = np.concatenate(
