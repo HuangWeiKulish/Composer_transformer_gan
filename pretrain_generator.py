@@ -10,7 +10,7 @@ cp_embedder_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer
 cp_generator_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/generator'
 
 tk = tf.keras.preprocessing.text.Tokenizer(filters='')
-tk, dataset = util.load_true_data(tk, in_seq_len=32, out_seq_len=128, step=60, batch_size=20, dur_denorm=20,
+tk, dataset = util.load_true_data(tk, in_seq_len=16, out_seq_len=64, step=60, batch_size=20, dur_denorm=20,
                    filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['sonat'])
 
 generator = generator.GeneratorPretrain(
@@ -31,7 +31,7 @@ x, _, _ = list(dataset.prefetch(1).as_numpy_iterator())[0]
 notes_dur = [[util.inds2notes(tk, nid, default='p'), dur * dur_denorm] for nid, dur in
              zip(x[0, :, 0], x[0, :, 1])]  # [[notes1, dur1], ...] for all batches 
 notes_dur = np.expand_dims(np.array(notes_dur, dtype=object), axis=0)
-generator.predict(x_in=notes_dur, tk=tk, out_seq_len=128, dur_denorm=20)
+generator.predict(x_in=notes_dur, tk=tk, out_seq_len=64, dur_denorm=20)
 
 # -----------------
 tmp = util.number_encode_text(notes_dur, tk, dur_norm=20)

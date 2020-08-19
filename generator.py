@@ -12,6 +12,7 @@ cp_embedder_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer
 cp_generator_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/generator'
 
 
+# todo: check values after embedding: has both postive and negative!!!!
 class Embedder(tf.keras.Model):
 
     def __init__(self, notes_pool_size, max_pos, embed_dim, dropout_rate=0.2):
@@ -20,11 +21,23 @@ class Embedder(tf.keras.Model):
         self.max_pos = max_pos
         self.embed_dim = embed_dim
         self.dropout_rate = dropout_rate
+        self.lambda_0 = Lambda(lambda x_: x_[:, :, 0])
+        self.lambda_1 = Lambda(lambda x_: x_[:, :, 1])
+        self.embedder = Embedding(notes_pool_size, embed_dim)
 
     def call(self, x_in):
-        # x_in: (batch, time_in, 2): the second dimension contains: notes, duration
-        x_out = self.embedding(x_in, self.notes_pool_size, self.max_pos, self.embed_dim, self.dropout_rate)
-        return x_out
+        # x_in dim: (batch, time_in, 2): 2 columns: notes, duration
+        # --------------------------- split x into x_notes and x_duration ---------------------------
+        x_notes = self.lambda_0(x_in)  # (batch, time_in), the string encoding of notes
+        x_duration = self.lambda_1(x_in)  # (batch, time_in), the normalized duration
+        # --------------------------- embedding ---------------------------
+        notes_emb = self.embedder(x_notes)  # (batch, time_in, embed_dim)
+        pos_emb = Embedder.positional_encoding(self.max_pos, self.embed_dim)  # (1, max_pos, embed_dim)
+        # --------------------------- combine ---------------------------
+        combine = notes_emb + pos_emb[:, : x_in.get_shape()[1], :] + x_duration[:, :, tf.newaxis]
+        if self.dropout_rate is not None:
+            combine = Dropout(self.dropout_rate)(combine)
+        return combine  # (batch, time_in, embed_dim)
 
     @staticmethod
     def get_angles(pos, i, embed_dim):
@@ -43,21 +56,6 @@ class Embedder(tf.keras.Model):
         angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
         pos_encoding = angle_rads[np.newaxis, ...]
         return tf.cast(pos_encoding, dtype=tf.float32)
-
-    @staticmethod
-    def embedding(x, notes_pool_size, max_pos, embed_dim, dropout_rate=0.2):
-        # x dim: (batch, time_in, 2)
-        # --------------------------- split x into x_notes and x_duration ---------------------------
-        x_notes = Lambda(lambda x_: x_[:, :, 0])(x)  # (batch, time_in), the string encoding of notes
-        x_duration = Lambda(lambda x_: x_[:, :, 1])(x)  # (batch, time_in), the normalized duration
-        # --------------------------- embedding ---------------------------
-        notes_emb = Embedding(notes_pool_size, embed_dim)(x_notes)  # (batch, time_in, embed_dim)
-        pos_emb = Embedder.positional_encoding(max_pos, embed_dim)  # (1, max_pos, embed_dim)
-        # --------------------------- combine ---------------------------
-        combine = notes_emb + pos_emb[:, :x.shape[1], :] + Reshape((x.shape[1], 1))(x_duration)
-        if dropout_rate is not None:
-            combine = Dropout(dropout_rate)(combine)
-        return combine  # (batch, time_in, embed_dim)
 
 
 class Generator(tf.keras.Model):
@@ -80,6 +78,12 @@ class Generator(tf.keras.Model):
         self.embedder_de = Embedder(notes_pool_size=out_notes_pool_size, max_pos=de_max_pos, embed_dim=embed_dim,
                                     dropout_rate=embedding_dropout_rate)
 
+
+
+
+
+
+
     def call(self, x_en_melody, x_de_in, mask_padding, mask_lookahead):
         # x_en  # (batch, in_seq_len, embed_dim): x_en_in is the embed output of notes
         # x_de_in  # (batch, out_seq_len, 2): x_de_in is the un-embedded target
@@ -87,7 +91,7 @@ class Generator(tf.keras.Model):
         # transformer for melody -----------------------------------------
         # x_out_melody: (batch, out_seq_len, out_notes_pool_size)
         x_de_melody = self.embedder_de(x_de_in)  # (batch, out_seq_len, embed_dim)
-        x_out_melody, all_weights_melody = transformer.TransformerBlocks.transformer(
+        x_out_melody, all_weights_melody = transformer.Transformer.transformer(
             x_en=x_en_melody, x_de=x_de_melody, mask_padding=mask_padding, mask_lookahead=mask_lookahead,
             out_notes_pool_size=self.out_notes_pool_size, embed_dim=self.embed_dim,
             encoder_layers=self.encoder_layers, decoder_layers=self.decoder_layers, n_heads=self.n_heads,
@@ -97,7 +101,7 @@ class Generator(tf.keras.Model):
         # transformer for duration -----------------------------------------
         # x_out_duration: (batch, out_seq_len, 1)
         x_de_duration = tf.slice(x_de_in, [0, 0, 1], [tf.shape(x_de_in)[0], tf.shape(x_de_in)[1], 1])  # (batch, out_seq_len, 1)
-        x_out_duration, all_weights_duration = transformer.TransformerBlocks.transformer(
+        x_out_duration, all_weights_duration = transformer.Transformer.transformer(
             x_en=x_en_melody, x_de=x_de_duration, mask_padding=mask_padding, mask_lookahead=mask_lookahead,
             out_notes_pool_size=self.out_notes_pool_size, embed_dim=1,
             encoder_layers=self.encoder_layers, decoder_layers=self.decoder_layers, n_heads=1,
@@ -134,6 +138,7 @@ class GeneratorPretrain(tf.keras.Model):
             x_en_ = self.embedder_en(x_in)  # (batch, in_seq_len, embed_dim)
             mask_padding = util.padding_mask(x_in[:, :, 0])  # (batch, 1, 1, seq_len)
             mask_lookahead = util.lookahead_mask(x_tar_in.shape[1])  # (seq_len, seq_len)
+
             # ------------------ predict ------------------------
             # x_out_melody: (batch, out_seq_len, out_notes_pool_size)
             # x_out_duration: (batch, out_seq_len, 1)
