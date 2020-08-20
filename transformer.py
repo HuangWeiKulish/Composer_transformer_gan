@@ -95,7 +95,7 @@ class Transformer(tf.keras.Model):
         x_de_ = x_de
         for i in range(self.decoder_layers):
             x_de_, all_weights['de_' + str(i + 1) + '_att_1'], all_weights['de_' + str(i + 1) + '_att_2'] = \
-                Transformer.transformer_decoder_block(
+                self.transformer_decoder_block(
                     x_de=x_de_, en_out=x_en_, mask_lookahead=mask_lookahead, mask_padding=mask_padding)
 
         # --------------------------- output ---------------------------
@@ -142,9 +142,4 @@ class Transformer(tf.keras.Model):
         skip_conn_3 = tf.keras.layers.Add()([fc, skip_conn_2])  # (batch, de_time_in, embed_dim)
         out = self.ln3_de(skip_conn_3)  # (batch, de_time_in, embed_dim)
         return out, att_weights_1, att_weights_2
-
-
-# todo: test  Transformer
-
-
 
