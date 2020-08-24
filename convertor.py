@@ -164,53 +164,42 @@ class Conversion:
         return notes_
 
     @staticmethod
-    def align_end(notes, all_strt, time_values, thres_startgap=0.3, thres_pctdur=0.5):
-        # notes: {21: [[velocity1, strt1, end1], ...], ..., 108: [[velocity1, strt1, end1], ...]}
-        # all_strt: np 2d array, columns: [note_id1, id_, velocity, strt, end]
+    def align_end(notes, all_strt, thres_endtgap=0.3, thres_pctdur=0.5):
+        # notes: {21: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...],  ...,
+        #         108: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...]}
+        # all_strt: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
         notes_ = copy.deepcopy(notes)
-        all_strt_ = all_strt[:, [0, 1, 3, 4]].copy()  # 3 columns: [note_id1, id_, strt, end]
-        all_strt_ = all_strt_[all_strt_[:, 3].argsort()[::-1]]  # sort according to end, descending
+        # all_strt_: 6 columns: [notes, index, strt_tick, end_tick, strt_time, end_time]
+        all_strt_ = all_strt[:, [0, 1, 3, 4, 5, 6]].copy()
+        all_strt_ = all_strt_[all_strt_[:, 3].argsort()]  # sort according to end_tk ascending
 
-        # modify notes' end_tick
-        all_strt_tm = []
-        for tm, st, nd in time_values:
-            if st == nd:
-                nts = all_strt_[all_strt_[:, -1] >= st]
-            else:  # st < nd
-                nts = all_strt_[(all_strt_[:, -1] >= st) & (all_strt_[:, -1] < nd)]
-
-
-
-
-
-        if len(nts) > 0:
-            while len(nts) > 0:
-                strt_max = nts[0, 2] + thres_startgap / tm
-                ids_included = np.where(nts[:, 2] <= strt_max)[0]
-                if len(ids_included) > 1:
-                    nt_included = nts[ids_included]
-                    new_tm = int(nt_included[:, 2].mean())
-                    for nt_, id_, s_, e_ in nt_included:
-                        # only modify start time if the distance to move is smaller than thres_pctdur * duration
-                        if abs(s_-new_tm) <= thres_pctdur * abs(e_ - s_):
-                            notes_[nt_][id_][1] = new_tm
-                    nts = nts[max(ids_included):]
-                else:
-                    nts = nts[1:]
+        # modify notes' end_tick and end_time
+        while len(all_strt_) > 0:
+            end_max = all_strt_[0, 5] + thres_endtgap
+            ids_included = np.where(all_strt_[:, 5] <= end_max)[0]
+            if len(ids_included) > 1:
+                nt_included = all_strt_[ids_included]
+                new_tk = int(nt_included[:, 3].mean())
+                new_tm = nt_included[:, 5].mean()
+                for nt_, id_, s_tk, e_tk, s_tm, e_tm in nt_included:
+                    # only modify end time if the distance to move is smaller than thres_pctdur * duration
+                    if abs(e_tm-new_tm) <= thres_pctdur * abs(e_tm - s_tm):
+                        id_ = int(id_)
+                        notes_[nt_][id_][2] = new_tk
+                        notes_[nt_][id_][4] = new_tm
+                all_strt_ = all_strt_[max(ids_included):]
+            else:
+                all_strt_ = all_strt_[1:]
         return notes_
 
     @staticmethod
-    def off_notes(notes, all_strt, thres_startgap=0.3, thres_pctdur=0.5):
-        # notes: {21: [[velocity1, strt1, end1], ...], ..., 108: [[velocity1, strt1, end1], ...]}
-        # all_strt: np 2d array, columns: [note_id1, id_, velocity, strt, end]
-
-
-
+    def off_notes_time(note_set):
         pass
 
     @staticmethod
     def midinfo(mid, default_tempo=500000, notes_pool_reduction=True,
-                thres_strt_startgap=0.3, thres_strt_pctdur=0.5):
+                thres_strt_gap=0.3, thres_strt_pctdur=0.5,  thres_end_gap=0.3, thres_end_pctdur=0.5,
+                thres_noteset_pctdur=0.3):
         # convert each track to nested list
         notes = {k: [] for k in range(21, 109)}
         tempos = []
@@ -239,10 +228,34 @@ class Conversion:
             #   if several notes start shortly one after another, replace a note's start time with mean start time when:
             #       1. time difference between note's original start time and mean start time is shorter
             #           than thres_strt_pctdur * notes_duration;
-            #       2. time range between the earliest note and the latest note is shorter than thres_strt_startgap (s)
+            #       2. time range between the earliest note and the latest note is shorter than thres_strt_gap (s)
             notes = Conversion.align_start(
-                notes, all_strt, thres_startgap=thres_strt_startgap, thres_pctdur=thres_strt_pctdur)
+                notes, all_strt, thres_startgap=thres_strt_gap, thres_pctdur=thres_strt_pctdur)
             all_strt = Conversion.combine_notes_info(notes)  # update
+
+            # align end:
+            #   if several notes end shortly one after another, replace a note's end time with mean end time when:
+            #       1. time difference between note's original end time and mean end time is shorter
+            #           than thres_end_pctdur * notes_duration;
+            #       2. time range between the earliest note and the latest note is shorter than thres_end_gap (s)
+            notes = Conversion.align_end(
+                notes, all_strt, thres_endtgap=thres_end_gap, thres_pctdur=thres_end_pctdur)
+
+            # combine notes with the same start and end as set, then
+            #   if 2 note sets overlap, and note_set1 starts before note_set2 starts,
+            #       1. remove the overlap part of note_set1, if:
+            #           note_set1 ends before or at the same time as note_set2 ends,
+            #           and overlap_duration <= thres_noteset_pctdur * note_set1_duration
+            #       2. remove end part of note_set1 from where the overlap starts, if:
+            #           note_set1 ends after note_set2 ends, and ...????????
+            #       3. note_set1 duration is too long, and the ending part has very weak sound
+            #           (the remove point start is calculated based on velocity and note_id)
+
+
+
+
+
+            # string encode
 
             """
             # check
@@ -264,181 +277,181 @@ class Conversion:
             # off previous notes if they are not started together
 
 
-    @staticmethod
-    def sets_encode_notes(nt, string_only=False):
-        # returns a function of {notes set: velocity} if string_only is False
-        #   else return string encode (example: '3_15', it means piano key 3 and key 15 are on,
-        #       '' means everything is off)
-        locs = np.where(nt > 0)[0]
-        result = '_'.join(locs.astype(int).astype(str).tolist()) \
-            if string_only else {k: v for k, v in zip(locs, nt[locs])}
-        return result
-
-    @staticmethod
-    def sets_encode_array(result_arys, result_time, string_only=False):
-        # result_arys: (length, 88): 2d array containing velocity of each note
-        # result_time: (length,): time duration of each tick
-        # this function returns 2d array [[notes_velocity_dict1, duration1], [notes_velocity_dict2, duration2], ...]
-        assert len(result_arys) == len(result_time)
-        nt0, tm0 = Conversion.sets_encode_notes(result_arys[0], string_only), result_time[0]
-        notes, dur = [], []
-        for nt, tm in zip(result_arys[1:], result_time[1:]):
-            nt = Conversion.sets_encode_notes(nt, string_only)
-            if nt == nt0:
-                tm0 += tm
-            else:
-                dur.append(tm0)
-                notes.append(nt0)
-                nt0, tm0 = nt, tm
-        notes.append(nt0)
-        dur.append(tm0)
-        return np.array([notes, dur], dtype=object).T
-
-
-
-    @staticmethod
-    def arry2mid(ary, tempo=500000, velocity=70):
-        # get the difference
-        new_ary = np.concatenate([np.array([[0] * 88]), np.array(ary)], axis=0)
-        changes = new_ary[1:] - new_ary[:-1]
-        # create a midi file with an empty track
-        mid_new = mido.MidiFile()
-        track = mido.MidiTrack()
-        mid_new.tracks.append(track)
-        track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=0))
-        # add difference in the empty track
-        last_time = 0
-        for ch in changes:
-            if set(ch) == {0}:  # no change
-                last_time += 1
-            else:
-                on_notes = np.where(ch > 0)[0]
-                on_notes_vol = ch[on_notes]
-                off_notes = np.where(ch < 0)[0]
-                first_ = True
-                for n, v in zip(on_notes, on_notes_vol):
-                    new_time = last_time if first_ else 0
-                    track.append(mido.Message('note_on', note=n + 21, velocity=v, time=new_time))
-                    first_ = False
-                for n in off_notes:
-                    new_time = last_time if first_ else 0
-                    track.append(mido.Message('note_off', note=n + 21, velocity=0, time=new_time))
-                    first_ = False
-                last_time = 0
-        return mid_new
+    # @staticmethod
+    # def sets_encode_notes(nt, string_only=False):
+    #     # returns a function of {notes set: velocity} if string_only is False
+    #     #   else return string encode (example: '3_15', it means piano key 3 and key 15 are on,
+    #     #       '' means everything is off)
+    #     locs = np.where(nt > 0)[0]
+    #     result = '_'.join(locs.astype(int).astype(str).tolist()) \
+    #         if string_only else {k: v for k, v in zip(locs, nt[locs])}
+    #     return result
+    #
+    # @staticmethod
+    # def sets_encode_array(result_arys, result_time, string_only=False):
+    #     # result_arys: (length, 88): 2d array containing velocity of each note
+    #     # result_time: (length,): time duration of each tick
+    #     # this function returns 2d array [[notes_velocity_dict1, duration1], [notes_velocity_dict2, duration2], ...]
+    #     assert len(result_arys) == len(result_time)
+    #     nt0, tm0 = Conversion.sets_encode_notes(result_arys[0], string_only), result_time[0]
+    #     notes, dur = [], []
+    #     for nt, tm in zip(result_arys[1:], result_time[1:]):
+    #         nt = Conversion.sets_encode_notes(nt, string_only)
+    #         if nt == nt0:
+    #             tm0 += tm
+    #         else:
+    #             dur.append(tm0)
+    #             notes.append(nt0)
+    #             nt0, tm0 = nt, tm
+    #     notes.append(nt0)
+    #     dur.append(tm0)
+    #     return np.array([notes, dur], dtype=object).T
 
 
 
-class DataPreparation:
-
-    @staticmethod
-    def get_all_filenames(filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['noct']):
-        file_names = []
-        for filepath, name_substr in itertools.product(filepath_list, name_substr_list):
-            file_names += glob.glob(os.path.join(filepath, '*' + name_substr + '*.pkl'))
-        return file_names
-
-    @staticmethod
-    def get_notes_duration(x):
-        # x is 1d array (length, ), each value in x represents a specific note id (from 1 to 88)
-        # 0 means all notes are off
-        # this function returns 2d array [[note1, duration1], [note2, duration2], ...]
-        notes, dur = [], []
-        cnt = 1
-        x_init = x[0]
-        for x_i in x[1:]:
-            if x_i == x_init:
-                cnt += 1
-            else:
-                dur.append(cnt)
-                notes.append(x_init)
-                x_init = x_i
-                cnt = 1
-        notes.append(x_init)
-        dur.append(cnt)
-        return np.array([notes, dur], dtype=object).T
-
-    @staticmethod
-    def token_encode(notes_i):
-        # notes_i is 1d array (88,), with values represent note id
-        result = '_'.join(notes_i[notes_i != 0].astype(str))
-        return result if result != '' else 'p'  # 'p' for pause
-
-    @staticmethod
-    def token_decode(str_i):
-        # str_i is string encoding of notes_i, e.g., '17_44_48_53', 'p' (pause)
-        # this function decode str_i to binary array (88, )
-        result = np.zeros((88,))
-        if str_i != 'p':  # 'p' for pause
-            tmp = str_i.split('_')
-            indx = np.array(tmp).astype(int)
-            result[indx] = 1
-        return result
-
-    @staticmethod
-    def get_melody_array(x):
-        # x is binary 2d array (length, 88)
-        x_ = np.multiply(x, range(1, 89))
-        x_ = [DataPreparation.token_encode(x_[i]) for i in range(len(x_))]
-        # summarize notes and time duration of each note:
-        # dim: (length, 2): [[notes1, duration1], [notes2, duration2], ...]
-        result = DataPreparation.get_notes_duration(x_)
-        return result
-
-    @staticmethod
-    def recover_array(x):
-        # x_melody: dim = (length, 2): [[notes1, duration1], [notes2, duration2], ...]
-        notes, dur = x.T
-        result = []
-        for n_i, d_i in zip(notes, dur):
-            result += [DataPreparation.token_decode(n_i).tolist()] * int(d_i)
-        return np.array(result)
-
-    @staticmethod
-    def cut_array(x, length, step, thres):
-        result = []
-        i = 0
-        while length + i < x.shape[0]:
-            result.append(x[i: (i + length)].tolist())
-            i += step
-        # if not to waste the last part of music
-        if length + i - x.shape[0] >= thres:
-            result.append(x[x.shape[0]-length:].tolist())
-        return result
-
-    @staticmethod
-    def batch_preprocessing(in_seq_len, out_seq_len, step=60,
-                            filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['noct']):
-        all_file_names = DataPreparation.get_all_filenames(
-            filepath_list=filepath_list, name_substr_list=name_substr_list)
-        x_in, x_tar = [], []
-        for filepath in all_file_names:
-            ary = pkl.load(open(filepath, 'rb'))  # file.shape = (length, 2)
-            length = in_seq_len+out_seq_len
-            ary = DataPreparation.cut_array(ary, length, step, int(step/3))  # (n_samples, length, 2)
-            ary = np.array(ary, dtype=object)
-            x_in += ary[:, :in_seq_len, :].tolist()
-            x_tar += ary[:, in_seq_len:, :].tolist()
-        return np.array(x_in, dtype=object), np.array(x_tar, dtype=object)
+    # @staticmethod
+    # def arry2mid(ary, tempo=500000, velocity=70):
+    #     # get the difference
+    #     new_ary = np.concatenate([np.array([[0] * 88]), np.array(ary)], axis=0)
+    #     changes = new_ary[1:] - new_ary[:-1]
+    #     # create a midi file with an empty track
+    #     mid_new = mido.MidiFile()
+    #     track = mido.MidiTrack()
+    #     mid_new.tracks.append(track)
+    #     track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=0))
+    #     # add difference in the empty track
+    #     last_time = 0
+    #     for ch in changes:
+    #         if set(ch) == {0}:  # no change
+    #             last_time += 1
+    #         else:
+    #             on_notes = np.where(ch > 0)[0]
+    #             on_notes_vol = ch[on_notes]
+    #             off_notes = np.where(ch < 0)[0]
+    #             first_ = True
+    #             for n, v in zip(on_notes, on_notes_vol):
+    #                 new_time = last_time if first_ else 0
+    #                 track.append(mido.Message('note_on', note=n + 21, velocity=v, time=new_time))
+    #                 first_ = False
+    #             for n in off_notes:
+    #                 new_time = last_time if first_ else 0
+    #                 track.append(mido.Message('note_off', note=n + 21, velocity=0, time=new_time))
+    #                 first_ = False
+    #             last_time = 0
+    #     return mid_new
 
 
-def process_midi(midifile_path='/Users/Wei/Desktop/piano_classic/Chopin',
-                 save_path='/Users/Wei/Desktop/piano_classic/Chopin_array', to_sparse=True):
-    all_mid_names = glob.glob(os.path.join(midifile_path, '*.mid'))
-    for i, mid_name in enumerate(all_mid_names):
-        if 'concerto' not in mid_name.lower():
-            try:
-                mid = mido.MidiFile(mid_name, clip=True)
-                mid_array = Conversion.mid2arry(mid)
-                mid_array = np.where(mid_array > 0, 1, 0)  # change to binary
-                mid_converted = sparse.csr_matrix(mid_array) if to_sparse \
-                    else DataPreparation.get_melody_array(mid_array)
-                pkl.dump(mid_converted,
-                         open(os.path.join(save_path, os.path.basename(mid_name).replace('.mid', '.pkl')), 'wb'))
-            except:
-                pass
-            print(i)
 
+# class DataPreparation:
+#
+#     @staticmethod
+#     def get_all_filenames(filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['noct']):
+#         file_names = []
+#         for filepath, name_substr in itertools.product(filepath_list, name_substr_list):
+#             file_names += glob.glob(os.path.join(filepath, '*' + name_substr + '*.pkl'))
+#         return file_names
+#
+#     @staticmethod
+#     def get_notes_duration(x):
+#         # x is 1d array (length, ), each value in x represents a specific note id (from 1 to 88)
+#         # 0 means all notes are off
+#         # this function returns 2d array [[note1, duration1], [note2, duration2], ...]
+#         notes, dur = [], []
+#         cnt = 1
+#         x_init = x[0]
+#         for x_i in x[1:]:
+#             if x_i == x_init:
+#                 cnt += 1
+#             else:
+#                 dur.append(cnt)
+#                 notes.append(x_init)
+#                 x_init = x_i
+#                 cnt = 1
+#         notes.append(x_init)
+#         dur.append(cnt)
+#         return np.array([notes, dur], dtype=object).T
+#
+#     @staticmethod
+#     def token_encode(notes_i):
+#         # notes_i is 1d array (88,), with values represent note id
+#         result = '_'.join(notes_i[notes_i != 0].astype(str))
+#         return result if result != '' else 'p'  # 'p' for pause
+#
+#     @staticmethod
+#     def token_decode(str_i):
+#         # str_i is string encoding of notes_i, e.g., '17_44_48_53', 'p' (pause)
+#         # this function decode str_i to binary array (88, )
+#         result = np.zeros((88,))
+#         if str_i != 'p':  # 'p' for pause
+#             tmp = str_i.split('_')
+#             indx = np.array(tmp).astype(int)
+#             result[indx] = 1
+#         return result
+#
+#     @staticmethod
+#     def get_melody_array(x):
+#         # x is binary 2d array (length, 88)
+#         x_ = np.multiply(x, range(1, 89))
+#         x_ = [DataPreparation.token_encode(x_[i]) for i in range(len(x_))]
+#         # summarize notes and time duration of each note:
+#         # dim: (length, 2): [[notes1, duration1], [notes2, duration2], ...]
+#         result = DataPreparation.get_notes_duration(x_)
+#         return result
+#
+#     @staticmethod
+#     def recover_array(x):
+#         # x_melody: dim = (length, 2): [[notes1, duration1], [notes2, duration2], ...]
+#         notes, dur = x.T
+#         result = []
+#         for n_i, d_i in zip(notes, dur):
+#             result += [DataPreparation.token_decode(n_i).tolist()] * int(d_i)
+#         return np.array(result)
+#
+#     @staticmethod
+#     def cut_array(x, length, step, thres):
+#         result = []
+#         i = 0
+#         while length + i < x.shape[0]:
+#             result.append(x[i: (i + length)].tolist())
+#             i += step
+#         # if not to waste the last part of music
+#         if length + i - x.shape[0] >= thres:
+#             result.append(x[x.shape[0]-length:].tolist())
+#         return result
+#
+#     @staticmethod
+#     def batch_preprocessing(in_seq_len, out_seq_len, step=60,
+#                             filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['noct']):
+#         all_file_names = DataPreparation.get_all_filenames(
+#             filepath_list=filepath_list, name_substr_list=name_substr_list)
+#         x_in, x_tar = [], []
+#         for filepath in all_file_names:
+#             ary = pkl.load(open(filepath, 'rb'))  # file.shape = (length, 2)
+#             length = in_seq_len+out_seq_len
+#             ary = DataPreparation.cut_array(ary, length, step, int(step/3))  # (n_samples, length, 2)
+#             ary = np.array(ary, dtype=object)
+#             x_in += ary[:, :in_seq_len, :].tolist()
+#             x_tar += ary[:, in_seq_len:, :].tolist()
+#         return np.array(x_in, dtype=object), np.array(x_tar, dtype=object)
+#
+#
+# def process_midi(midifile_path='/Users/Wei/Desktop/piano_classic/Chopin',
+#                  save_path='/Users/Wei/Desktop/piano_classic/Chopin_array', to_sparse=True):
+#     all_mid_names = glob.glob(os.path.join(midifile_path, '*.mid'))
+#     for i, mid_name in enumerate(all_mid_names):
+#         if 'concerto' not in mid_name.lower():
+#             try:
+#                 mid = mido.MidiFile(mid_name, clip=True)
+#                 mid_array = Conversion.mid2arry(mid)
+#                 mid_array = np.where(mid_array > 0, 1, 0)  # change to binary
+#                 mid_converted = sparse.csr_matrix(mid_array) if to_sparse \
+#                     else DataPreparation.get_melody_array(mid_array)
+#                 pkl.dump(mid_converted,
+#                          open(os.path.join(save_path, os.path.basename(mid_name).replace('.mid', '.pkl')), 'wb'))
+#             except:
+#                 pass
+#             print(i)
+#
 
 
 
