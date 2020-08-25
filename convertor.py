@@ -88,13 +88,17 @@ class Conversion:
                 notes_[k].append(tmp[0].tolist())
                 for v_, s_, e_ in tmp[1:]:
                     v0, s0, e0 = notes_[k][-1]
-                    if s_ < e_:  # if start tick is smaller than end tick:
-                        if e0 < s_:
-                            notes_[k].append([v_, s_, e_])
-                        elif s_ <= e0 < e_:
-                            notes_[k][-1] = [v0, s0, e_]
-                        else:  # e0 >= e_
-                            notes_[k][-1] = [v0, s0, e0]
+                    if s0 == s_:
+                        notes_[k][-1] = [v0, s0, e0]
+                    else:  # s0 < s_
+                        if s_ < e_:  # if start tick is smaller than end tick:
+                            if e0 < s_:
+                                notes_[k].append([v_, s_, e_])
+                            elif s_ <= e0 < e_:
+                                notes_[k][-1] = [v0, s0, s_]
+                                notes_[k].append([v_, s_+1, e_])
+                            else:  # e0 >= e_
+                                notes_[k][-1] = [v0, s0, e0]
         return notes_
 
     @staticmethod
@@ -124,32 +128,34 @@ class Conversion:
         #         108: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...]}
         notes_ = copy.deepcopy(notes)
         # get all starting ticks
-        all_strt = [[-1, -1, -1, -1, -1, -1, -1]]  # notes, index, velocity, start_tick, end_tick, start_time, end_time
+        all_notes = [[-1, -1, -1, -1, -1, -1, -1]]  # notes, index, velocity, start_tick, end_tick, start_time, end_time
         for k in notes_.keys():
             if len(notes_[k]) > 0:
-                all_strt = np.append(
-                    all_strt,
+                all_notes = np.append(
+                    all_notes,
                     np.column_stack([[k]*len(notes_[k]), range(len(notes_[k])), np.array(notes_[k])]),
                     axis=0)
-        all_strt = np.array(all_strt)[1:]
-        return all_strt  # np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes = np.array(all_notes)[1:]
+        return all_notes  # np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
 
     @staticmethod
-    def align_start(notes, all_strt, thres_startgap=0.3, thres_pctdur=0.5):
+    def align_start(notes, thres_startgap=0.3, thres_pctdur=0.5):
         # notes: {21: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...],  ...,
         #         108: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...]}
-        # all_strt: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
         notes_ = copy.deepcopy(notes)
-        # all_strt_: 6 columns: [notes, index, strt_tick, end_tick, strt_time, end_time]
-        all_strt_ = all_strt[:, [0, 1, 3, 4, 5, 6]].copy()
-        all_strt_ = all_strt_[all_strt_[:, 2].argsort()]  # sort according to strt_tick ascending
+
+        # all_notes_: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes_ = Conversion.combine_notes_info(notes)
+        # all_notes_: 6 columns: [notes, index, strt_tick, end_tick, strt_time, end_time]
+        all_notes_ = all_notes_[:, [0, 1, 3, 4, 5, 6]]
+        all_notes_ = all_notes_[all_notes_[:, 2].argsort()]  # sort according to strt_tick ascending
 
         # modify notes' start_tick and start_time
-        while len(all_strt_) > 0:
-            strt_max = all_strt_[0, 4] + thres_startgap
-            ids_included = np.where(all_strt_[:, 4] <= strt_max)[0]
+        while len(all_notes_) > 0:
+            strt_max = all_notes_[0, 4] + thres_startgap
+            ids_included = np.where(all_notes_[:, 4] <= strt_max)[0]
             if len(ids_included) > 1:
-                nt_included = all_strt_[ids_included]
+                nt_included = all_notes_[ids_included]
                 new_tk = int(nt_included[:, 2].mean())
                 new_tm = nt_included[:, 4].mean()
                 for nt_, id_, s_tk, e_tk, s_tm, e_tm in nt_included:
@@ -158,27 +164,30 @@ class Conversion:
                         id_ = int(id_)
                         notes_[nt_][id_][1] = new_tk
                         notes_[nt_][id_][3] = new_tm
-                all_strt_ = all_strt_[max(ids_included):]
+                all_notes_ = all_notes_[max(ids_included):]
             else:
-                all_strt_ = all_strt_[1:]
+                all_notes_ = all_notes_[1:]
         return notes_
 
     @staticmethod
-    def align_end(notes, all_strt, thres_endtgap=0.3, thres_pctdur=0.5):
+    def align_end(notes, thres_endtgap=0.5, thres_pctdur=0.5):
         # notes: {21: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...],  ...,
         #         108: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...]}
-        # all_strt: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
+        # all_notes: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
         notes_ = copy.deepcopy(notes)
-        # all_strt_: 6 columns: [notes, index, strt_tick, end_tick, strt_time, end_time]
-        all_strt_ = all_strt[:, [0, 1, 3, 4, 5, 6]].copy()
-        all_strt_ = all_strt_[all_strt_[:, 3].argsort()]  # sort according to end_tk ascending
+
+        # all_notes_: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes_ = Conversion.combine_notes_info(notes)
+        # all_notes_: 6 columns: [notes, index, strt_tick, end_tick, strt_time, end_time]
+        all_notes_ = all_notes_[:, [0, 1, 3, 4, 5, 6]]
+        all_notes_ = all_notes_[all_notes_[:, 3].argsort()]  # sort according to end_tk ascending
 
         # modify notes' end_tick and end_time
-        while len(all_strt_) > 0:
-            end_max = all_strt_[0, 5] + thres_endtgap
-            ids_included = np.where(all_strt_[:, 5] <= end_max)[0]
+        while len(all_notes_) > 0:
+            end_max = all_notes_[0, 5] + thres_endtgap
+            ids_included = np.where(all_notes_[:, 5] <= end_max)[0]
             if len(ids_included) > 1:
-                nt_included = all_strt_[ids_included]
+                nt_included = all_notes_[ids_included]
                 new_tk = int(nt_included[:, 3].mean())
                 new_tm = nt_included[:, 5].mean()
                 for nt_, id_, s_tk, e_tk, s_tm, e_tm in nt_included:
@@ -187,18 +196,37 @@ class Conversion:
                         id_ = int(id_)
                         notes_[nt_][id_][2] = new_tk
                         notes_[nt_][id_][4] = new_tm
-                all_strt_ = all_strt_[max(ids_included):]
+                all_notes_ = all_notes_[max(ids_included):]
             else:
-                all_strt_ = all_strt_[1:]
+                all_notes_ = all_notes_[1:]
         return notes_
+
+    @staticmethod
+    def combine_notes_same_on_off(all_notes):
+        # all_notes: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes_ = all_notes[:, [0, 2, 3, 4, 5, 6]]  # [notes, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes_ = all_notes_[all_notes_[:, 2].argsort()]  # sort according to start_tick ascending
+        result = [[{int(all_notes_[0][0])}] + all_notes_[0][1:].tolist()]
+        for nt, vl, stk, etk, stm, etm in all_notes_[1:]:
+            nt_set_0, vl_0, stk_0, etk_0, stm_0, etm_0 = result[-1]
+            if (stk == stk_0) and (etk == etk_0):
+                result[-1] = [nt_set_0.union({int(nt)}), max(vl, vl_0), stk, etk, stm, etm]
+            else:
+                result.append([{int(nt)}, vl, stk, etk, stm, etm])
+        return result
 
     @staticmethod
     def off_notes_time(note_set):
         pass
 
+
+
+
+
+
     @staticmethod
     def midinfo(mid, default_tempo=500000, notes_pool_reduction=True,
-                thres_strt_gap=0.3, thres_strt_pctdur=0.5,  thres_end_gap=0.3, thres_end_pctdur=0.5,
+                thres_strt_gap=0.3, thres_strt_pctdur=0.5,  thres_end_gap=0.5, thres_end_pctdur=0.5,
                 thres_noteset_pctdur=0.3):
         # convert each track to nested list
         notes = {k: [] for k in range(21, 109)}
@@ -221,35 +249,39 @@ class Conversion:
         #         108: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...]}
 
         if notes_pool_reduction:
-            # all_strt: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
-            all_strt = Conversion.combine_notes_info(notes)
-
-            # align start:
+            # align start: --------------------------------------------------------------------------------------------
             #   if several notes start shortly one after another, replace a note's start time with mean start time when:
             #       1. time difference between note's original start time and mean start time is shorter
             #           than thres_strt_pctdur * notes_duration;
             #       2. time range between the earliest note and the latest note is shorter than thres_strt_gap (s)
             notes = Conversion.align_start(
-                notes, all_strt, thres_startgap=thres_strt_gap, thres_pctdur=thres_strt_pctdur)
-            all_strt = Conversion.combine_notes_info(notes)  # update
+                notes, thres_startgap=thres_strt_gap, thres_pctdur=thres_strt_pctdur)
 
-            # align end:
+            # align end: ----------------------------------------------------------------------------------------------
             #   if several notes end shortly one after another, replace a note's end time with mean end time when:
             #       1. time difference between note's original end time and mean end time is shorter
             #           than thres_end_pctdur * notes_duration;
             #       2. time range between the earliest note and the latest note is shorter than thres_end_gap (s)
             notes = Conversion.align_end(
-                notes, all_strt, thres_endtgap=thres_end_gap, thres_pctdur=thres_end_pctdur)
+                notes, thres_endtgap=thres_end_gap, thres_pctdur=thres_end_pctdur)
 
-            # combine notes with the same start and end as set, then
+            # combine notes with the same start and end as set, then  -------------------------------------------------
             #   if 2 note sets overlap, and note_set1 starts before note_set2 starts,
             #       1. remove the overlap part of note_set1, if:
             #           note_set1 ends before or at the same time as note_set2 ends,
             #           and overlap_duration <= thres_noteset_pctdur * note_set1_duration
-            #       2. remove end part of note_set1 from where the overlap starts, if:
-            #           note_set1 ends after note_set2 ends, and ...????????
-            #       3. note_set1 duration is too long, and the ending part has very weak sound
+            #       2. note_set1 duration is long, and the ending part has very weak sound
             #           (the remove point start is calculated based on velocity and note_id)
+            all_notes = Conversion.combine_notes_info(notes)
+            all_notes = Conversion.combine_notes_same_on_off(all_notes)
+
+
+
+
+            # Todo: Conversion.combine_notes_same_on_off one more time in the end
+
+            # all_notes.shape
+
 
 
 
