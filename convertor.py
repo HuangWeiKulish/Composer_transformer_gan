@@ -169,44 +169,12 @@ class Conversion:
                 all_notes_ = all_notes_[1:]
         return notes_
 
-    # @staticmethod
-    # def align_end(notes, thres_endtgap=0.5, thres_pctdur=0.5):
-    #     # notes: {21: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...],  ...,
-    #     #         108: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...]}
-    #     # all_notes: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
-    #     notes_ = copy.deepcopy(notes)
-    #
-    #     # all_notes_: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
-    #     all_notes_ = Conversion.combine_notes_info(notes)
-    #     # all_notes_: 6 columns: [notes, index, strt_tick, end_tick, strt_time, end_time]
-    #     all_notes_ = all_notes_[:, [0, 1, 3, 4, 5, 6]]
-    #     all_notes_ = all_notes_[all_notes_[:, 3].argsort()]  # sort according to end_tk ascending
-    #
-    #     # modify notes' end_tick and end_time
-    #     while len(all_notes_) > 0:
-    #         end_max = all_notes_[0, 5] + thres_endtgap
-    #         ids_included = np.where(all_notes_[:, 5] <= end_max)[0]
-    #         if len(ids_included) > 1:
-    #             nt_included = all_notes_[ids_included]
-    #             new_tk = int(nt_included[:, 3].mean())
-    #             new_tm = nt_included[:, 5].mean()
-    #             for nt_, id_, s_tk, e_tk, s_tm, e_tm in nt_included:
-    #                 # only modify end time if the distance to move is smaller than thres_pctdur * duration
-    #                 if abs(e_tm-new_tm) <= thres_pctdur * abs(e_tm - s_tm):
-    #                     id_ = int(id_)
-    #                     notes_[nt_][id_][2] = new_tk
-    #                     notes_[nt_][id_][4] = new_tm
-    #             all_notes_ = all_notes_[max(ids_included):]
-    #         else:
-    #             all_notes_ = all_notes_[1:]
-    #     return notes_
-
     @staticmethod
-    def combine_notes_same_on_off(all_notes, thres_pctdur=0.4, thres_s=0.5, strick=True):
-        # all_notes: np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
-        all_notes_ = all_notes[:, [0, 2, 3, 4, 5, 6]]  # [notes, velocity, start_tick, end_tick, start_time, end_time]
-        all_notes_ = all_notes_[all_notes_[:, 2].argsort()]  # sort according to start_tick ascending
-        result = [[{int(all_notes_[0][0])}] + all_notes_[0][1:].tolist()]
+    def combine_notes_same_on_off(all_notes, thres_pctdur=0.4, thres_s=0.5, strick=False):
+        # all_notes: np 2d array, columns: [notes, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes_ = all_notes[all_notes[:, 2].argsort()]  # sort according to start_tick ascending
+        result = [[{int(all_notes_[0][0])} if type(all_notes_[0][0]) is not set else all_notes_[0][0]] + \
+                  all_notes_[0][1:].tolist()]
         for nt, vl, stk, etk, stm, etm in all_notes_[1:]:
             nt_set_0, vl_0, stk_0, etk_0, stm_0, etm_0 = result[-1]
             # combine if the two note_set start at the same time,
@@ -214,50 +182,60 @@ class Conversion:
             if stk == stk_0:
                 if strick:
                     if etk == etk_0:
-                        result[-1] = [nt_set_0.union({int(nt)}), max(vl, vl_0), stk, etk_0, stm, etm_0]
+                        result[-1] = [nt_set_0.union({int(nt)} if type(nt) is not set else nt),
+                                      max(vl, vl_0), stk, etk_0, stm, etm_0]
                 else:
                     if abs(etm-etm_0) <= max(thres_pctdur * abs(etm_0-stm_0), thres_s):
-                        result[-1] = [nt_set_0.union({int(nt)}), max(vl, vl_0), stk, etk_0, stm, etm_0]
+                        result[-1] = [nt_set_0.union({int(nt)} if type(nt) is not set else nt),
+                                      max(vl, vl_0), stk, etk_0, stm, etm_0]
             else:
-                result.append([{int(nt)}, vl, stk, etk, stm, etm])
-        return result
+                result.append([{int(nt)} if type(nt) is not set else nt, vl, stk, etk, stm, etm])
+        return np.array(result)
 
     @staticmethod
     def off_notes_earlier(all_notes, thres_endlate=0.4, thres_noteset_pctdur=0.8):
-        # all_notes: [[notes_set, velocity, strt_tk, end_tk, strt_tm, end_tm], ...]
-        all_notes_ = np.array(all_notes)
+        # all_notes: np 2d array [[notes_set, velocity, strt_tk, end_tk, strt_tm, end_tm], ...]
+        #all_notes_ = np.array(all_notes)
         # sort according to start tick ascending, and then end tick ascending
-        all_notes_ = all_notes_[np.lexsort((all_notes_[:, 3], all_notes_[:, 2]))]
-        result = [all_notes_[0].tolist()]
+        # all_notes_ = all_notes_[np.lexsort((all_notes_[:, 3], all_notes_[:, 2]))]
+        all_notes_ = all_notes[all_notes[:, 2].argsort()]  # sort according strt_tk ascending
+        result, unmodified = [], [all_notes_[0].tolist()]
         all_notes_ = all_notes_[1:]
+
         while len(all_notes_) > 0:
-            nts0, v0, strt_tk0, end_tk0, strt_tm0, end_tm0 = result[-1]
-            dur0 = end_tm0 - strt_tm0
+            # print(len(all_notes_), len(result), len(unmodified))
             nts_, v_, strt_tk_, end_tk_, strt_tm_, end_tm_ = all_notes_[0]
-            if end_tm0 <= end_tm_:
-                # 1. note_set1 ends before or at the same time as note_set2 ends:
-                #   remove the overlap part of note_set1, if
-                #   overlap_duration <= thres_noteset_pctdur * note_set1_duration
-                if abs(end_tm_ - end_tm0) <= thres_noteset_pctdur * dur0:
-                    result[-1] = [nts0, v0, strt_tk0, strt_tk_, strt_tm0, strt_tm_]
-            else:
-                # 2. note_set1 ends after note_set2 ends:
-                # remove the overlap part of note_set1, if:
-                #   note_set1 duration is long, and the ending part has very weak sound
-                #   (the remove point start is calculated based on velocity and note_id)
-                pass
-
-
-
-
-            result.append([nts_, v_, strt_tk_, end_tk_, strt_tm_, end_tm_])
+            ids_remain_unmodified = []
+            for i in range(len(unmodified)):
+                nts0, v0, strt_tk0, end_tk0, strt_tm0, end_tm0 = unmodified[i]
+                if end_tm0 <= strt_tm_:  # no overlap, no need to modify
+                    result.append([nts0, v0, strt_tk0, end_tk0, strt_tm0, end_tm0])
+                elif strt_tm_ < end_tm0 <= end_tm_:
+                    dur0 = end_tm0 - strt_tm0
+                    # 1. remove the overlap part of note_set1, if
+                    #       overlap_duration <= thres_noteset_pctdur * note_set1_duration
+                    if abs(end_tm_ - end_tm0) <= max(thres_noteset_pctdur * dur0, thres_endlate):
+                        result.append([nts0, v0, strt_tk0, strt_tk_, strt_tm0, strt_tm_])  # modify
+                    else:
+                        ids_remain_unmodified.append(i)
+                else:
+                    # Todo:
+                    # 2. note_set1 ends after note_set2 ends:
+                    # remove the overlap part of note_set1, if:
+                    #   note_set1 duration is long, and the ending part has very weak sound
+                    #   (the remove point start is calculated based on velocity and note_id)
+                    ids_remain_unmodified.append(i)
+            unmodified = np.array(unmodified)[ids_remain_unmodified].tolist()
+            unmodified.append([nts_, v_, strt_tk_, end_tk_, strt_tm_, end_tm_])
             all_notes_ = all_notes_[1:]
-        return all_notes_
+        result += unmodified
+        return np.array(result)
 
     @staticmethod
-    def midinfo(mid, default_tempo=500000, notes_pool_reduction=True,
-                thres_strt_gap=0.3, thres_strt_pctdur=0.5,  thres_end_gap=0.5, thres_end_pctdur=0.5,
-                thres_noteset_pctdur=0.3):
+    def midinfo(mid, default_tempo=500000, notes_pool_reduction=True, combine_strickly=False,
+                thres_strt_gap=0.3, thres_strt_pctdur=0.5,
+                thres_noteset_pctdur=0.3, thres_noteset_s=0.5,
+                thres_endlate=0.4, thres_notesetoff_pctdur=0.7):
         # convert each track to nested list
         notes = {k: [] for k in range(21, 109)}
         tempos = []
@@ -287,48 +265,30 @@ class Conversion:
             notes = Conversion.align_start(
                 notes, thres_startgap=thres_strt_gap, thres_pctdur=thres_strt_pctdur)
 
-            # align end: ----------------------------------------------------------------------------------------------
-            #   if several notes end shortly one after another, replace a note's end time with mean end time when:
-            #       1. time difference between note's original end time and mean end time is shorter
-            #           than thres_end_pctdur * notes_duration;
-            #       2. time range between the earliest note and the latest note is shorter than thres_end_gap (s)
-            # notes = Conversion.align_end(
-            #     notes, thres_endtgap=thres_end_gap, thres_pctdur=thres_end_pctdur)
+            # combine notes: ------------------------------------------------------------------------------------------
+            # combine note which are on at the same time and off at almost the same time together
+            all_notes = Conversion.combine_notes_info(notes)
+            all_notes = Conversion.combine_notes_same_on_off(
+                all_notes[:, [0, 2, 3, 4, 5, 6]], thres_pctdur=thres_noteset_pctdur,
+                thres_s=thres_noteset_s, strick=combine_strickly)
 
             # combine notes with the same start and end as set, then  -------------------------------------------------
             #   if 2 note sets overlap, and note_set1 starts before note_set2 starts,
             #       1. remove the overlap part of note_set1, if:
             #           note_set1 ends before or at the same time as note_set2 ends,
-            #           and overlap_duration <= thres_noteset_pctdur * note_set1_duration
+            #           and overlap_duration <= max(thres_noteset_pctdur * note_set1_duration, thres_noteset_s)
             #       2. note_set1 duration is long, and the ending part has very weak sound
             #           (the remove point start is calculated based on velocity and note_id)
-            all_notes = Conversion.combine_notes_info(notes)
-            all_notes = Conversion.combine_notes_same_on_off(all_notes)
+            all_notes = Conversion.off_notes_earlier(all_notes, thres_endlate=thres_endlate,
+                                                     thres_noteset_pctdur=thres_notesetoff_pctdur)
+            all_notes = Conversion.combine_notes_same_on_off(
+                all_notes, thres_pctdur=thres_noteset_pctdur, thres_s=thres_noteset_s, strick=combine_strickly)
+
+        # string encode -----------------------------------
 
 
 
 
-            # Todo: Conversion.combine_notes_same_on_off one more time in the end
-
-            # all_notes.shape
-
-
-
-
-
-
-            # string encode
-
-            """
-            # check
-            for k in notes.keys():
-                for x in notes[k]:
-                    if (x[1] >= x[2]) | (x[3] >= x[4]):
-                    #if (x[1] >= x[2]):
-                        print('error')
-                        print(k)
-                        print(x)
-            """
 
 
 
