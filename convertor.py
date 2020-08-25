@@ -216,7 +216,13 @@ class Conversion:
         return result
 
     @staticmethod
-    def off_notes_time(note_set):
+    def off_notes_time(all_notes):
+        # all_notes: [[notes_set, velocity, strt_tk, end_tk, strt_tm, end_tm], ...]
+        all_notes_ = np.array(all_notes)
+        all_notes_ = all_notes_[all_notes_[:, 2].argsort()]
+
+
+
         pass
 
 
