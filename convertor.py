@@ -126,20 +126,19 @@ class Conversion:
     def combine_notes_info(notes):
         # notes: {21: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...],  ...,
         #         108: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...]}
-        notes_ = copy.deepcopy(notes)
         # get all starting ticks
-        all_notes = [[-1, -1, -1, -1, -1, -1, -1]]  # notes, index, velocity, start_tick, end_tick, start_time, end_time
-        for k in notes_.keys():
-            if len(notes_[k]) > 0:
+        all_notes = [[-1, -1, -1, -1, -1, -1, -1]]
+        for k in notes.keys():
+            if len(notes[k]) > 0:
                 all_notes = np.append(
                     all_notes,
-                    np.column_stack([[k]*len(notes_[k]), range(len(notes_[k])), np.array(notes_[k])]),
+                    np.column_stack([[k]*len(notes[k]), range(len(notes[k])), np.array(notes[k])]),
                     axis=0)
         all_notes = np.array(all_notes)[1:]
         return all_notes  # np 2d array, columns: [notes, index, velocity, start_tick, end_tick, start_time, end_time]
 
     @staticmethod
-    def align_start(notes, thres_startgap=0.3, thres_pctdur=0.5):
+    def align_start(notes, thres_startgap=0.2, thres_pctdur=0.5):
         # notes: {21: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...],  ...,
         #         108: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...]}
         notes_ = copy.deepcopy(notes)
@@ -170,72 +169,55 @@ class Conversion:
         return notes_
 
     @staticmethod
-    def combine_notes_same_on_off(all_notes, thres_pctdur=0.4, thres_s=0.5, strick=False):
+    def combine_notes_same_on_off(notes, thres_pctdur=0.4, thres_s=0.5, clean=True):
         # all_notes: np 2d array, columns: [notes, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes = Conversion.combine_notes_info(notes)[:, [0, 2, 3, 4, 5, 6]].astype(object)
         all_notes_ = all_notes[all_notes[:, 2].argsort()]  # sort according to start_tick ascending
-        result = [[{int(all_notes_[0][0])} if type(all_notes_[0][0]) is not set else all_notes_[0][0]] + \
-                  all_notes_[0][1:].tolist()]
-        for nt, vl, stk, etk, stm, etm in all_notes_[1:]:
-            nt_set_0, vl_0, stk_0, etk_0, stm_0, etm_0 = result[-1]
-            # combine if the two note_set start at the same time,
-            #   and one end later than another for no more than max(thres_pctdur * note_set1_duration, thres_s)
-            if stk == stk_0:
-                if strick:
-                    if etk == etk_0:
-                        result[-1] = [nt_set_0.union({int(nt)} if type(nt) is not set else nt),
-                                      max(vl, vl_0), stk, etk_0, stm, etm_0]
+        result = []
+        if clean:
+            all_strt_tm = np.unique(all_notes_[:, 4])
+            for st in all_strt_tm:
+                # combine if the two note_set start at the same time,
+                nt_stm = all_notes_[all_notes_[:, 4] == st]
+                ends = nt_stm[:, 5]
+                ends_mid = (ends.max()+ends.min()) / 2.0
+                tolerance = max(thres_pctdur * ends_mid, thres_s)
+                if max(ends_mid - min(ends), max(ends) - ends_mid) <= tolerance:
+                    # end time difference is within tolerance: combine
+                    result.append([set(nt_stm[:, 0].astype(int)), nt_stm[:, 1].mean(),  # notes_set, velocity
+                                   nt_stm[0, 2], int(nt_stm[:, 3].mean()),              # start_tick, end_tick
+                                   st, np.median(nt_stm[:, 5])])                        # start_time, end_time
                 else:
-                    if abs(etm-etm_0) <= max(thres_pctdur * abs(etm_0-stm_0), thres_s):
-                        result[-1] = [nt_set_0.union({int(nt)} if type(nt) is not set else nt),
-                                      max(vl, vl_0), stk, etk_0, stm, etm_0]
-            else:
-                result.append([{int(nt)} if type(nt) is not set else nt, vl, stk, etk, stm, etm])
+                    # end time difference is too large: split into 2
+                    nt_stm_1 = nt_stm[nt_stm[:, 5] <= ends_mid]
+                    result.append([set(nt_stm_1[:, 0].astype(int)), nt_stm_1[:, 1].mean(),  # notes_set, velocity
+                                   nt_stm_1[0, 2], int(nt_stm_1[:, 3].mean()),              # start_tick, end_tick
+                                   st, np.median(nt_stm_1[:, 5])])                          # start_time, end_time
+                    nt_stm_2 = nt_stm[nt_stm[:, 5] > ends_mid]
+                    result.append([set(nt_stm_2[:, 0].astype(int)), nt_stm_2[:, 1].mean(),  # notes_set, velocity
+                                   nt_stm_2[0, 2], int(nt_stm_2[:, 3].mean()),              # start_tick, end_tick
+                                   st, np.median(nt_stm_2[:, 5])])                          # start_time, end_time
+        else:
+            all_notes_[:, 0] = [{x} for x in all_notes_[:, 0].astype(int)]
         return np.array(result)
 
     @staticmethod
-    def off_notes_earlier(all_notes, thres_endlate=0.4, thres_noteset_pctdur=0.8):
-        # all_notes: np 2d array [[notes_set, velocity, strt_tk, end_tk, strt_tm, end_tm], ...]
-        #all_notes_ = np.array(all_notes)
-        # sort according to start tick ascending, and then end tick ascending
-        # all_notes_ = all_notes_[np.lexsort((all_notes_[:, 3], all_notes_[:, 2]))]
-        all_notes_ = all_notes[all_notes[:, 2].argsort()]  # sort according strt_tk ascending
-        result, unmodified = [], [all_notes_[0].tolist()]
-        all_notes_ = all_notes_[1:]
-
-        while len(all_notes_) > 0:
-            # print(len(all_notes_), len(result), len(unmodified))
-            nts_, v_, strt_tk_, end_tk_, strt_tm_, end_tm_ = all_notes_[0]
-            ids_remain_unmodified = []
-            for i in range(len(unmodified)):
-                nts0, v0, strt_tk0, end_tk0, strt_tm0, end_tm0 = unmodified[i]
-                if end_tm0 <= strt_tm_:  # no overlap, no need to modify
-                    result.append([nts0, v0, strt_tk0, end_tk0, strt_tm0, end_tm0])
-                elif strt_tm_ < end_tm0 <= end_tm_:
-                    dur0 = end_tm0 - strt_tm0
-                    # 1. remove the overlap part of note_set1, if
-                    #       overlap_duration <= thres_noteset_pctdur * note_set1_duration
-                    if abs(end_tm_ - end_tm0) <= max(thres_noteset_pctdur * dur0, thres_endlate):
-                        result.append([nts0, v0, strt_tk0, strt_tk_, strt_tm0, strt_tm_])  # modify
-                    else:
-                        ids_remain_unmodified.append(i)
-                else:
-                    # Todo:
-                    # 2. note_set1 ends after note_set2 ends:
-                    # remove the overlap part of note_set1, if:
-                    #   note_set1 duration is long, and the ending part has very weak sound
-                    #   (the remove point start is calculated based on velocity and note_id)
-                    ids_remain_unmodified.append(i)
-            unmodified = np.array(unmodified)[ids_remain_unmodified].tolist()
-            unmodified.append([nts_, v_, strt_tk_, end_tk_, strt_tm_, end_tm_])
-            all_notes_ = all_notes_[1:]
-        result += unmodified
-        return np.array(result)
+    def encode_notes(all_notes, use_time=True):
+        # all_notes: 2d array: [notes, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes = all_notes[all_notes[:, 2].argsort()]  # sort according to start_tick ascending
+        # encode notes to string
+        notes_str = ['_'.join(np.array(list(x))[np.array(list(x)).argsort()].astype('str'))
+                     for x in all_notes[:, 0]]
+        velocity = all_notes[:, 1]
+        start = all_notes[:, 4] if use_time else all_notes[:, 2]
+        end = all_notes[:, 5] if use_time else all_notes[:, 3]
+        notes_duration = end - start
+        time_passed_since_last_note = start - np.array([0]+start[:-1].tolist())
+        return np.array([notes_str, velocity, time_passed_since_last_note, notes_duration]).T
 
     @staticmethod
-    def midinfo(mid, default_tempo=500000, notes_pool_reduction=True, combine_strickly=False,
-                thres_strt_gap=0.3, thres_strt_pctdur=0.5,
-                thres_noteset_pctdur=0.3, thres_noteset_s=0.5,
-                thres_endlate=0.4, thres_notesetoff_pctdur=0.7):
+    def mid2arry(mid, default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.5,
+                 thres_noteset_pctdur=0.3, thres_noteset_s=0.5, use_time=True):
         # convert each track to nested list
         notes = {k: [] for k in range(21, 109)}
         tempos = []
@@ -256,7 +238,7 @@ class Conversion:
         # notes: {21: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...],  ...,
         #         108: [[velocity1, strt1, end1, strt_tm1, end_tm1], ...]}
 
-        if notes_pool_reduction:
+        if clean:
             # align start: --------------------------------------------------------------------------------------------
             #   if several notes start shortly one after another, replace a note's start time with mean start time when:
             #       1. time difference between note's original start time and mean start time is shorter
@@ -266,95 +248,56 @@ class Conversion:
                 notes, thres_startgap=thres_strt_gap, thres_pctdur=thres_strt_pctdur)
 
             # combine notes: ------------------------------------------------------------------------------------------
-            # combine note which are on at the same time and off at almost the same time together
-            all_notes = Conversion.combine_notes_info(notes)
+            #   1. align notes which are on at almost the same time
+            #   2. then, for the notes on at the same time, allow them to end at 2 different times at most
             all_notes = Conversion.combine_notes_same_on_off(
-                all_notes[:, [0, 2, 3, 4, 5, 6]], thres_pctdur=thres_noteset_pctdur,
-                thres_s=thres_noteset_s, strick=combine_strickly)
-
-            # combine notes with the same start and end as set, then  -------------------------------------------------
-            #   if 2 note sets overlap, and note_set1 starts before note_set2 starts,
-            #       1. remove the overlap part of note_set1, if:
-            #           note_set1 ends before or at the same time as note_set2 ends,
-            #           and overlap_duration <= max(thres_noteset_pctdur * note_set1_duration, thres_noteset_s)
-            #       2. note_set1 duration is long, and the ending part has very weak sound
-            #           (the remove point start is calculated based on velocity and note_id)
-            all_notes = Conversion.off_notes_earlier(all_notes, thres_endlate=thres_endlate,
-                                                     thres_noteset_pctdur=thres_notesetoff_pctdur)
+                notes, thres_pctdur=thres_noteset_pctdur, thres_s=thres_noteset_s, clean=True)
+        else:
             all_notes = Conversion.combine_notes_same_on_off(
-                all_notes, thres_pctdur=thres_noteset_pctdur, thres_s=thres_noteset_s, strick=combine_strickly)
+                notes, thres_pctdur=0.4, thres_s=0.5, clean=False)
 
-        # string encode -----------------------------------
+        # encode -----------------------------------
+        all_notes = Conversion.encode_notes(all_notes, use_time=use_time)
+        return all_notes
 
+    @staticmethod
+    def arry2mid(ary, tempo=500000, ticks_per_beat=120, use_time=True):
+        # ary: 2d array: [notes_str, velocity, time_passed_since_last_note, notes_duration], in start sequence order
+        notes_str = ary[:, 0]
+        velocity = ary[:, 1]
+        time_passed_since_last_note = ary[:, 2]
+        notes_duration = ary[:, 3]
 
+        # calculate start tick and end tick
+        start = np.cumsum(time_passed_since_last_note)
+        end = start + notes_duration
+        if use_time:  # convert time to number of ticks
+            start = np.array([mido.second2tick(x, ticks_per_beat=ticks_per_beat, tempo=tempo) for x in start])
+            end = np.array([mido.second2tick(x, ticks_per_beat=ticks_per_beat, tempo=tempo) for x in end])
 
+        # summarize information
+        ary_new = []
+        for nts, vl, st, ed in zip(notes_str, velocity, start, end):
+            nts_ = nts.split('_')
+            for nt_i in nts_:
+                # notes on message
+                ary_new.append(['note_on', int(nt_i), int(np.rint(vl)), int(np.rint(st))])
+                ary_new.append(['note_off', int(nt_i), int(np.rint(vl)), int(np.rint(ed))])
+        ary_new = np.array(ary_new, dtype=object)
+        ary_new = ary_new[ary_new[:, 3].argsort()]
 
+        # create a midi file with an empty track
+        mid_new = mido.MidiFile(ticks_per_beat=ticks_per_beat)
+        track = mido.MidiTrack()
+        mid_new.tracks.append(track)
+        track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=0))
 
-
-
-
-    # @staticmethod
-    # def sets_encode_notes(nt, string_only=False):
-    #     # returns a function of {notes set: velocity} if string_only is False
-    #     #   else return string encode (example: '3_15', it means piano key 3 and key 15 are on,
-    #     #       '' means everything is off)
-    #     locs = np.where(nt > 0)[0]
-    #     result = '_'.join(locs.astype(int).astype(str).tolist()) \
-    #         if string_only else {k: v for k, v in zip(locs, nt[locs])}
-    #     return result
-    #
-    # @staticmethod
-    # def sets_encode_array(result_arys, result_time, string_only=False):
-    #     # result_arys: (length, 88): 2d array containing velocity of each note
-    #     # result_time: (length,): time duration of each tick
-    #     # this function returns 2d array [[notes_velocity_dict1, duration1], [notes_velocity_dict2, duration2], ...]
-    #     assert len(result_arys) == len(result_time)
-    #     nt0, tm0 = Conversion.sets_encode_notes(result_arys[0], string_only), result_time[0]
-    #     notes, dur = [], []
-    #     for nt, tm in zip(result_arys[1:], result_time[1:]):
-    #         nt = Conversion.sets_encode_notes(nt, string_only)
-    #         if nt == nt0:
-    #             tm0 += tm
-    #         else:
-    #             dur.append(tm0)
-    #             notes.append(nt0)
-    #             nt0, tm0 = nt, tm
-    #     notes.append(nt0)
-    #     dur.append(tm0)
-    #     return np.array([notes, dur], dtype=object).T
-
-
-
-    # @staticmethod
-    # def arry2mid(ary, tempo=500000, velocity=70):
-    #     # get the difference
-    #     new_ary = np.concatenate([np.array([[0] * 88]), np.array(ary)], axis=0)
-    #     changes = new_ary[1:] - new_ary[:-1]
-    #     # create a midi file with an empty track
-    #     mid_new = mido.MidiFile()
-    #     track = mido.MidiTrack()
-    #     mid_new.tracks.append(track)
-    #     track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=0))
-    #     # add difference in the empty track
-    #     last_time = 0
-    #     for ch in changes:
-    #         if set(ch) == {0}:  # no change
-    #             last_time += 1
-    #         else:
-    #             on_notes = np.where(ch > 0)[0]
-    #             on_notes_vol = ch[on_notes]
-    #             off_notes = np.where(ch < 0)[0]
-    #             first_ = True
-    #             for n, v in zip(on_notes, on_notes_vol):
-    #                 new_time = last_time if first_ else 0
-    #                 track.append(mido.Message('note_on', note=n + 21, velocity=v, time=new_time))
-    #                 first_ = False
-    #             for n in off_notes:
-    #                 new_time = last_time if first_ else 0
-    #                 track.append(mido.Message('note_off', note=n + 21, velocity=0, time=new_time))
-    #                 first_ = False
-    #             last_time = 0
-    #     return mid_new
+        # add information in the track
+        last_time = 0
+        for m, nt, vl, tm in ary_new:
+            track.append(mido.Message(m, note=nt, velocity=vl, time=tm-last_time))
+            last_time = tm
+        return mid_new
 
 
 
@@ -507,31 +450,10 @@ import os
 
 midifile_path = '/Users/Wei/Desktop/selected/chopin'
 mid = mido.MidiFile(os.path.join(midifile_path, 'ballade_op_23_no_1_a_(nc)smythe.mid'), clip=True)
-
-
-
-
-
-ary = Conversion.mid2arry(mid)
-
-
-
-
-
-
-tmp = tmp[:1000]
-plt.plot(range(tmp.shape[0]), np.multiply(np.where(tmp > 0, 1, 0), range(1, 89)), marker='.', markersize=1, linestyle='')
-plt.title("nocturne_27_2_(c)inoue.mid")
-plt.show()
-
-mid_new = Conversion.arry2mid(tmp, 545455)
-mid_new.save('mid_new.mid')
-
-tst = Conversion.track2seq(mid.tracks[2])
-np.where(np.array(tst).sum(axis=1)>0)  # 288
-
-for m in mid.tracks[2][:50]:
-    print(m)
+ary = Conversion.mid2arry(mid, default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.2,
+                 thres_noteset_pctdur=0.3, thres_noteset_s=0.5, use_time=True)
+new_mid = Conversion.arry2mid(ary, tempo=500000, ticks_per_beat=120, use_time=True)
+new_mid.save('/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/new_mid.mid')
 """
 
 """
