@@ -9,6 +9,8 @@ import itertools
 import pickle as pkl
 import copy
 import glob
+import tensorflow as tf
+import json
 
 
 class Conversion:
@@ -204,6 +206,17 @@ class Conversion:
         return np.array(result)
 
     @staticmethod
+    def chords_limit(all_notes, max=10):
+        # all_notes: np 2d array, columns: [notes, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes_ = all_notes.copy()
+        for i in range(len(all_notes_)):
+            if len(all_notes_[i][0]) > max:
+                l_ = list(all_notes_[i][0])
+                l_.sort()
+                all_notes_[i][0] = set(l_[(len(all_notes_[i][0])-max):])
+        return all_notes_
+
+    @staticmethod
     def encode_notes(all_notes, use_time=True):
         # all_notes: 2d array: [notes, velocity, start_tick, end_tick, start_time, end_time]
         all_notes = all_notes[all_notes[:, 2].argsort()]  # sort according to start_tick ascending
@@ -220,7 +233,7 @@ class Conversion:
 
     @staticmethod
     def mid2arry(mid, default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.3,
-                 thres_noteset_pctdur=0.3, thres_noteset_s=0.5, use_time=True):
+                 thres_noteset_pctdur=0.3, thres_noteset_s=0.5, chords_nmax=10, use_time=True):
         # convert each track to nested list
         notes = {k: [] for k in range(21, 109)}
         tempos = []
@@ -255,6 +268,7 @@ class Conversion:
             #   2. then, for the notes on at the same time, allow them to end at 2 different times at most
             all_notes = Conversion.combine_notes_same_on_off(
                 notes, thres_pctdur=thres_noteset_pctdur, thres_s=thres_noteset_s, clean=True)
+            all_notes = Conversion.chords_limit(all_notes, max=chords_nmax)
         else:
             all_notes = Conversion.combine_notes_same_on_off(
                 notes, thres_pctdur=0.4, thres_s=0.5, clean=False)
@@ -303,10 +317,120 @@ class Conversion:
         return mid_new
 
 
+def batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
+                            array_path='/Users/Wei/Desktop/midi_train/arry',
+                            default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.2,
+                            thres_noteset_pctdur=0.3, thres_noteset_s=0.5, use_time=True, print_progress=True):
+    midifile_subdir = [f.path for f in os.scandir(midifile_path) if f.is_dir()]
+    array_subdir = [f.path for f in os.scandir(array_path) if f.is_dir()]
+    array_makedir = [os.path.join(array_path, os.path.basename(x)) for x in midifile_subdir]
+    print('start to process')
+
+    for ary_sd, md_sd in zip(array_makedir, midifile_subdir):
+        print()
+        if ary_sd not in array_subdir:
+            os.mkdir(ary_sd)
+        midi_files = os.listdir(md_sd)
+        ary_files = os.listdir(ary_sd)
+        for mdf in midi_files:
+            filenm, extn = os.path.splitext(mdf)
+            if (mdf not in ary_files) & (extn.lower() == '.mid'):
+                try:
+                    mid_ = mido.MidiFile(os.path.join(md_sd, mdf), clip=True)
+                    ary_ = Conversion.mid2arry(
+                        mid_, default_tempo=default_tempo, clean=clean, thres_strt_gap=thres_strt_gap,
+                        thres_strt_pctdur=thres_strt_pctdur, thres_noteset_pctdur=thres_noteset_pctdur,
+                        thres_noteset_s=thres_noteset_s, use_time=use_time)
+                    pkl.dump(ary_, open(os.path.join(ary_sd, filenm+'.pkl'), 'wb'))
+                    if print_progress:
+                        print(os.path.join(ary_sd, filenm+'.pkl'))
+                except:
+                    pass
+
+"""
+batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
+                            array_path='/Users/Wei/Desktop/midi_train/arry',
+                            default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.2,
+                            thres_noteset_pctdur=0.3, thres_noteset_s=0.5, use_time=True, print_progress=True)
+"""
+
+
+def notes_indexing(
+        array_path='/Users/Wei/Desktop/midi_train/arry',
+        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict.pkl',
+        print_num=True):
+    try:
+        tk = pkl.load(open(tk_path, 'rb'))
+    except:
+        tk = tf.keras.preprocessing.text.Tokenizer(filters='')
+    array_subdir = [f.path for f in os.scandir(array_path) if f.is_dir()]
+    for sb in array_subdir:
+        nms = os.listdir(sb)
+        for nm in nms:
+            filenm, extn = os.path.splitext(nm)
+            if extn.lower() == '.pkl':
+                ary = pkl.load(open(os.path.join(sb, nm), 'rb'))
+                tk.fit_on_texts(ary[:, 0].tolist())
+                if print_num:
+                    print('Number notes: {}'.format(len(json.loads(tk.get_config()['word_counts']))))
+    pkl.dump(tk, open(tk_path, 'wb'))
+
+
+
+    # ary = all_notes.copy()
+
+
+def get_infrequent_notes_str(tk, lim_cnt=5, lim_pctl=90):
+    nts_cnt = np.array(list(json.loads(tk.get_config()['word_counts']).items()), dtype=object)
+    cnt_max = max(np.percentile(nts_cnt[:, 1], lim_pctl), lim_cnt)
+    return nts_cnt[nts_cnt[:, 1] <= cnt_max, 0]
+
+
+def infrequent_notes_str_replacement(tk, lim_cnt=5, lim_pctl=90):
+    # replace infrequent notes string with more frequent notes string
+    infq_nt = get_infrequent_notes_str(tk, lim_cnt=lim_cnt, lim_pctl=lim_pctl)
+    
+
+
+"""
+notes_indexing(
+        array_path='/Users/Wei/Desktop/midi_train/arry', 
+        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict.pkl',
+        print_num=True)
+
+tk = pkl.load(open(tk_path, 'rb'))
+
+import matplotlib.pyplot as plt
+tmp = np.array(list(json.loads(tk.get_config()['word_counts']).items()), dtype=object)
+len(tmp)  # 64700
+
+np.median(tmp[:, 1])
+len(tmp[tmp[:, 1] >= np.median(tmp[:, 1])])  # 38304
+
+np.mean(tmp[:, 1])
+len(tmp[tmp[:, 1] >= np.mean(tmp[:, 1])])  # 3389
+
+pctl = 80
+np.percentile(tmp[:, 1], pctl)
+len(tmp[tmp[:, 1] >= np.percentile(tmp[:, 1], pctl)])  # 14989
+
+tmp[tmp[:, 1]<2, 0]
+
+
+
+plt.hist(tmp[:, 1], bins=500)
+plt.xlim(0, 5000)
+plt.show()
+
+
+# 64700  
+"""
+
+
 class DataPreparation:
 
     @staticmethod
-    def get_all_filenames(filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['noct']):
+    def get_all_filenames(filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['']):
         file_names = []
         for filepath, name_substr in itertools.product(filepath_list, name_substr_list):
             file_names += glob.glob(os.path.join(filepath, '*' + name_substr + '*.pkl'))
@@ -314,6 +438,7 @@ class DataPreparation:
 
     @staticmethod
     def cut_array(x, length, step, thres):
+        # x: np 2d array: columns [notes_str, velocity, time_passed_since_last_note, notes_duration]
         result = []
         i = 0
         while length + i < x.shape[0]:
@@ -340,40 +465,17 @@ class DataPreparation:
         return np.array(x_in, dtype=object), np.array(x_tar, dtype=object)
 
 
-def batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
-                            array_path='/Users/Wei/Desktop/midi_train/arry',
-                            default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.2,
-                            thres_noteset_pctdur=0.3, thres_noteset_s=0.5, use_time=True, print_progress=True):
-    midifile_subdir = [f.path for f in os.scandir(midifile_path) if f.is_dir()]
-    array_subdir = [f.path for f in os.scandir(array_path) if f.is_dir()]
-    array_makedir = [os.path.join(array_path, os.path.basename(x)) for x in midifile_subdir]
 
-    for ary_sd, md_sd in zip(array_makedir, midifile_subdir):
-        if ary_sd not in array_subdir:
-            os.mkdir(ary_sd)
-        midi_files = os.listdir(md_sd)
-        ary_files = os.listdir(ary_sd)
-        for mdf in midi_files:
-            filenm, extn = os.path.splitext(mdf)
-            if (mdf not in ary_files) & (extn.lower() == '.mid'):
-                try:
-                    mid_ = mido.MidiFile(os.path.join(md_sd, mdf), clip=True)
-                    ary_ = Conversion.mid2arry(
-                        mid_, default_tempo=default_tempo, clean=clean, thres_strt_gap=thres_strt_gap,
-                        thres_strt_pctdur=thres_strt_pctdur, thres_noteset_pctdur=thres_noteset_pctdur,
-                        thres_noteset_s=thres_noteset_s, use_time=use_time)
-                    pkl.dump(ary_, open(os.path.join(ary_sd, filenm+'.pkl'), 'wb'))
-                    if print_progress:
-                        print(os.path.join(ary_sd, filenm+'.pkl'))
-                except:
-                    pass
 
-"""
-batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
-                            array_path='/Users/Wei/Desktop/midi_train/arry',
-                            default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.2,
-                            thres_noteset_pctdur=0.3, thres_noteset_s=0.5, use_time=True)
-"""
+
+
+
+
+# tk.get_config()
+
+
+
+
 
 
 
@@ -396,10 +498,10 @@ batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
 
 
 """
-import matplotlib.pyplot as plt
+
 import os
 
-midifile_path = '/Users/Wei/Desktop/selected/chopin'
+midifile_path = '/Users/Wei/Desktop/midi_train/midi/chopin'
 mid = mido.MidiFile(os.path.join(midifile_path, 'ballade_op_23_no_1_a_(nc)smythe.mid'), clip=True)
 ary = Conversion.mid2arry(mid, default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.2,
                  thres_noteset_pctdur=0.3, thres_noteset_s=0.5, use_time=True)
