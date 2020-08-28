@@ -347,6 +347,7 @@ def batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
                 except:
                     pass
 
+
 """
 batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
                             array_path='/Users/Wei/Desktop/midi_train/arry',
@@ -376,17 +377,16 @@ def notes_indexing(
     pkl.dump(tk, open(tk_path, 'wb'))
 
 
-
-    # ary = all_notes.copy()
+"""
+notes_indexing(
+        array_path='/Users/Wei/Desktop/midi_train/arry', 
+        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict.pkl',
+        print_num=True)
+"""
 
 
 def get_notes_frequency(tk):
     return np.array(list(json.loads(tk.get_config()['word_counts']).items()), dtype=object)
-
-
-def get_infrequent_notes_str(nts_cnt, lim_cnt=5, lim_pctl=90):
-    cnt_max = max(np.percentile(nts_cnt[:, 1], lim_pctl), lim_cnt)
-    return nts_cnt[nts_cnt[:, 1] <= cnt_max, 0]
 
 
 def nts_cnt_str2set(nts_cnt):
@@ -396,26 +396,81 @@ def nts_cnt_str2set(nts_cnt):
     return result
 
 
-def infrequent_notes_str_replacement(tk, lim_cnt=5, lim_pctl=90):
+def find_octave(x):
+    # nt is int between 0 and 88,
+    # this function fins all octaves of x, including itself
+    return set([x-12*i for i in range(int(x/12)+1)] + [x+12*i for i in range(int((88-x)/12)+1)])
+
+
+def split_notesset(notes_set):
+    # example: notes_set={12, 24, 46, 73, 11, 56, 68} will be splitted into
+    #   oct_sets = [{56, 68}, {12, 24}] and other_set = {11, 46, 73}
+    oct_sets, other_set = [], set()
+    tmp = notes_set.copy()
+    while len(tmp) > 0:
+        x = list(tmp)[0]
+        x_oct = find_octave(x)
+        overlap = tmp.intersection(x_oct)
+        if len(overlap) > 1:
+            oct_sets.append(overlap)
+        else:  # len(overlap) = 1
+            other_set = other_set.union(overlap)
+        tmp -= overlap
+    return oct_sets, other_set
+
+
+def sample_list_sets(list_sets):
+    # list_sets is a list of sets
+    # sample at least one element from each set in list_sets, find out all possible samples
+    result = []
+    for s_ in list_sets:
+        result.append(list(itertools.chain(*[itertools.combinations(s_, i) for i in range(1, len(s_))])))
+    result_final = list(itertools.chain(*[list(itertools.product(*result[i:])) for i in range(len(result)-1)]))
+    result_final = [set(itertools.chain(*x)) for x in result_final]
+    result_final += [set(x) for x in itertools.chain(*result)]
+    return result_final
+
+
+def find_notes_replacement(nt, frq_nts_cnt):
+    oct_sets, other_set = split_notesset(nt)
+    # step 1: try to remove octave if exists
+    if len(oct_sets) > 0:
+        rpl = []
+        rm = []
+
+    []
+    #split_notesset({1,2,3,4})
+    # Todo: sample_list_sets() to same for removal
+
+
+
+
+
+def infrequent_notes_replacement(tk, lim_cnt=5, lim_pctl=90):
+    # get a dictionary which matches infrequent notes string with frequent notes string
     nts_cnt = get_notes_frequency(tk)
     nts_cnt = nts_cnt_str2set(nts_cnt)
-    # replace infrequent notes string with more frequent notes string
-    infq_nt = get_infrequent_notes_str(nts_cnt, lim_cnt=lim_cnt, lim_pctl=lim_pctl)
-    # 1 try to remove octave
+    cnt_max = max(np.percentile(nts_cnt[:, 1], lim_pctl), lim_cnt)
 
-    # 2. try to replace with notes which is n octaves (12*n) apart
+    infq_nts = nts_cnt[nts_cnt[:, 1] <= cnt_max, 0]
+    frq_nts_cnt = nts_cnt[nts_cnt[:, 1] > cnt_max]
+    print('number infrequent notes strings = {}'.format(len(infq_nts)))
+    print('number frequent notes strings = {}'.format(len(frq_nts_cnt)))
 
-    # 3. try to remove one or more of the notes
+
+
+    # 1. try to replace with notes which is n octaves (12*n) apart
+
+    # 2 try to remove octave
+
+    # 3. try to remove one or more of the notes, other than octave
 
 
 
 
 
 """
-notes_indexing(
-        array_path='/Users/Wei/Desktop/midi_train/arry', 
-        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict.pkl',
-        print_num=True)
+
 
 tk = pkl.load(open(tk_path, 'rb'))
 
@@ -485,35 +540,6 @@ class DataPreparation:
 
 
 
-
-
-
-
-
-# tk.get_config()
-
-
-
-
-
-
-
-# def process_midi(midifile_path='/Users/Wei/Desktop/piano_classic/Chopin',
-#                  save_path='/Users/Wei/Desktop/piano_classic/Chopin_array', to_sparse=True):
-#     all_mid_names = glob.glob(os.path.join(midifile_path, '*.mid'))
-#     for i, mid_name in enumerate(all_mid_names):
-#         if 'concerto' not in mid_name.lower():
-#             try:
-#                 mid = mido.MidiFile(mid_name, clip=True)
-#                 mid_array = Conversion.mid2arry(mid)
-#                 mid_array = np.where(mid_array > 0, 1, 0)  # change to binary
-#                 mid_converted = sparse.csr_matrix(mid_array) if to_sparse \
-#                     else DataPreparation.get_melody_array(mid_array)
-#                 pkl.dump(mid_converted,
-#                          open(os.path.join(save_path, os.path.basename(mid_name).replace('.mid', '.pkl')), 'wb'))
-#             except:
-#                 pass
-#             print(i)
 
 
 """
