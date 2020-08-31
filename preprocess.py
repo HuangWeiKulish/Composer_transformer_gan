@@ -384,14 +384,6 @@ def batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
                         mid_, default_tempo=default_tempo, clean=clean, thres_strt_gap=thres_strt_gap,
                         thres_strt_pctdur=thres_strt_pctdur, thres_noteset_pctdur=thres_noteset_pctdur,
                         thres_noteset_s=thres_noteset_s, use_time=use_time)
-                    #
-                    #
-                    # if len(np.where(ary_[:, 2] < 0)[0]) > 0:
-                    #     print(os.path.join(md_sd, mdf))
-                    #     print('negative cnt = {}'.format(len(np.where(ary_[:, 2] < 0)[0])))
-                    #
-                    #
-
                     pkl.dump(ary_, open(os.path.join(ary_sd, filenm+'.pkl'), 'wb'))
                     if print_progress:
                         print(os.path.join(ary_sd, filenm+'.pkl'))
@@ -433,6 +425,7 @@ notes_indexing(
         array_path='/Users/Wei/Desktop/midi_train/arry', 
         tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict.pkl',
         print_num=True)
+# total: 
 """
 
 
