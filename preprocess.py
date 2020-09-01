@@ -7,7 +7,6 @@ del meta._META_SPEC_BY_TYPE['key_signature']
 import os
 import itertools
 import pickle as pkl
-import copy
 import glob
 import tensorflow as tf
 import json
@@ -131,8 +130,8 @@ class Conversion:
                 nts = all_notes[all_notes[:, 2] >= st]
             else:  # st < nd
                 nts = all_notes[(all_notes[:, 2] >= st) & (all_notes[:, 2] < ed)]
-            strt_tm = (nts[:, 2] - last_tk)*tm + last_tm_ps
-            end_tm = (nts[:, 3] - last_tk)*tm + last_tm_ps
+            strt_tm = (nts[:, 2] - last_tk) * tm + last_tm_ps
+            end_tm = (nts[:, 3] - last_tk) * tm + last_tm_ps
             result += np.column_stack([nts, strt_tm, end_tm]).tolist()
             last_tm_ps, last_tk = tm_ps, st
         return np.array(result, dtype=object)
@@ -253,21 +252,25 @@ class Conversion:
     def encode_notes(all_notes, use_time=True):
         # all_notes (np 2d array): [set(note_id1, ...), velocity, strt_tk, end_tk, strt_tm, end_tm, index]
         note_id_col, velocity_col, strt_tk_col, end_tk_col, strt_tm_col, end_tm_col = range(6)
-        sort_col = strt_tm_col if use_time else strt_tk_col
-        all_notes = all_notes[all_notes[:, sort_col].argsort()]  # sort according to start_tick ascending
+        strt_col = strt_tm_col if use_time else strt_tk_col
+        end_col = end_tm_col if use_time else end_tk_col
+        all_notes = all_notes[all_notes[:, strt_col].argsort()]  # sort according to start_tick ascending
 
         # encode notes to string
         notes_str = ['_'.join(np.array(list(x))[np.array(list(x)).argsort()].astype('str'))
                      for x in all_notes[:, 0]]
         velocity = all_notes[:, 1]
-        start = all_notes[:, sort_col]
-        end = all_notes[:, sort_col]
+        start = all_notes[:, strt_col]
+        end = all_notes[:, end_col]
+
+        # sometimes after modifying the end time using mean end time during combining notes,
+        #   the duratoin can be negative ==> modify the duration using default value
         notes_duration = end - start
+        notes_duration = np.where(notes_duration <= 0, 0.01 if use_time else 3, notes_duration)
+
         time_passed_since_last_note = start - np.array([0]+start[:-1].tolist())
 
         result = np.array([notes_str, velocity, time_passed_since_last_note, notes_duration]).T
-        # Todo: can there be time_passed_since_last_note < 0???????
-
         return result
 
     @staticmethod
@@ -392,6 +395,7 @@ def batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
 
 
 """
+# mid = mido.MidiFile('/Users/Wei/Desktop/midi_train/midi/albeniz/albeniz_arabe_(c)yogore.mid', clip=True)
 batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
                             array_path='/Users/Wei/Desktop/midi_train/arry',
                             default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.2,
@@ -683,6 +687,8 @@ def batch_replace_infreq_nts(
 
 
 """
+nt_rp_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_replacement.pkl'
+notes_replacement = pkl.load(open(nt_rp_path, 'rb'))
 batch_replace_infreq_nts(
         notes_replacement, array_path='/Users/Wei/Desktop/midi_train/arry',
         array_mod_path='/Users/Wei/Desktop/midi_train/arry_modified', show_progress=True)
@@ -695,7 +701,14 @@ notes_indexing(
 
 tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_mod.pkl'       
 tk = pkl.load(open(tk_path, 'rb'))
-len(json.loads(tk.get_config()['word_counts']))  # 15000
+print(len(json.loads(tk.get_config()['word_counts'])))  # 15000
+
+tk.fit_on_texts(['<start>', '<end>'])
+print(len(json.loads(tk.get_config()['word_counts'])))  # 15002
+
+tk_path_final='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'       
+pkl.dump(tk, open(tk_path_final, 'wb'))
+
 """
 
 
@@ -747,8 +760,5 @@ x_in, x_tar = DataPreparation.batch_preprocessing(in_seq_len, out_seq_len, step=
                             pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
 print(x_in.shape)
 print(x_tar.shape)
+
 """
-
-
-
-

@@ -2,7 +2,7 @@ import numpy as np
 import os
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-import convertor
+import preprocess
 
 tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
@@ -35,31 +35,29 @@ def softargmax(x, beta=1e10):
     return tf.reduce_sum(tf.nn.softmax(x*beta) * x_range, axis=-1)
 
 
-def number_encode_text(x, tk, dur_norm=20):
-    # x: (batch, length, 2); 2: [notes in text format, duration in integer format]
+def number_encode_text(x, tk):
+    # x: (batch, length, 4); 4 columns: [notes in text format, velocity, time since last start, notes duration]
     # ------------- encode notes from text to integer --------------
     x_0 = tk.texts_to_sequences(x[:, :, 0].tolist())
-    x_ = np.array([x_0, np.divide(x[:, :, 1], dur_norm).tolist()])  # combine encoded result with duration
-    x_ = np.transpose(x_, (1, 2, 0))
-    return x_
+    return np.append(np.expand_dims(x_0, axis=-1), x[:, :, 1:], axis=-1).astype(np.float32)
 
 
-def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, dur_denorm=20,
-                   filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['']):
-    # tk = tf.keras.preprocessing.text.Tokenizer(filters='')
-    x_in, x_tar = convertor.DataPreparation.batch_preprocessing(in_seq_len, out_seq_len-1, step, filepath_list, name_substr_list)
+def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50,
+                   pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
+    # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
+    # tk = pkl.load(open(tk_path, 'rb'))
+    x_in, x_tar = preprocess.DataPreparation.batch_preprocessing(
+        in_seq_len, out_seq_len-1, step, pths, name_substr_list)
     batch = x_in.shape[0]
+
     # append '<start>' in front and '<end>' at the end
     x_tar = np.concatenate(
-        [np.expand_dims(np.array([['<start>', 0]] * batch, dtype=object), axis=1),
+        [np.expand_dims(np.array([['<start>', 0, 0, 0]] * batch, dtype=object), axis=1),
          x_tar,
-         np.expand_dims(np.array([['<end>', 0]] * batch, dtype=object), axis=1)], axis=1)
-    tk.fit_on_texts(x_in[:, :, 0].tolist())
-    tk.fit_on_texts(x_tar[:, :, 0].tolist())
+         np.expand_dims(np.array([['<end>', 0, 0, 0]] * batch, dtype=object), axis=1)], axis=1)
 
-    x_in_ = number_encode_text(x_in, tk, dur_denorm)
-    x_tar_ = number_encode_text(x_tar, tk, dur_denorm)
-
+    x_in_ = number_encode_text(x_in, tk)
+    x_tar_ = number_encode_text(x_tar, tk)
     dataset = tf.data.Dataset.from_tensor_slices((x_in_, x_tar_[:, :-1, :], x_tar_[:, 1:, :])).cache()
     dataset = dataset.shuffle(x_in.shape[0]+1).batch(batch_size)
     return tk, dataset
@@ -88,7 +86,6 @@ class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
         arg2 = step * (self.warmup_steps ** -1.5)
 
         return tf.math.rsqrt(self.embed_dim) * tf.math.minimum(arg1, arg2)
-
 
 
 @tf.function
