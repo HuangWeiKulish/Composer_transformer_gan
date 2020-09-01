@@ -3,18 +3,34 @@ import numpy as np
 import util
 import generator
 import tensorflow as tf
+import json
+import pickle as pkl
 tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 cp_embedder_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/embedder'
 cp_generator_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/generator'
 
-tk = tf.keras.preprocessing.text.Tokenizer(filters='')
-tk, dataset = util.load_true_data(tk, in_seq_len=16, out_seq_len=64, step=60, batch_size=20, dur_denorm=20,
-                   filepath_list=['/Users/Wei/Desktop/piano_classic/Chopin_array'], name_substr_list=['sonat'])
+in_seq_len, out_seq_len = 16, 64
+
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
+tk = pkl.load(open(tk_path, 'rb'))
+tk, dataset = util.load_true_data(
+    tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+    pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
+
+notes_pool_size = len(json.loads(tk.get_config()['word_counts']))
+
+
+
+
+
+
+
 
 generator = generator.GeneratorPretrain(
-    en_max_pos=5000, de_max_pos=10000, embed_dim=256, n_heads=4, in_notes_pool_size=150000, out_notes_pool_size=150000,
+    en_max_pos=5000, de_max_pos=10000, embed_dim=256, n_heads=4, in_notes_pool_size=notes_pool_size,
+    out_notes_pool_size=notes_pool_size,
     fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
     transformer_dropout_rate=0.2, embedding_dropout_rate=0.2, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
 
@@ -22,6 +38,7 @@ generator.train(epochs=1, dataset=dataset, notes_dur_loss_weight=(1, 1), save_mo
                 cp_embedder_path=cp_embedder_path, cp_generator_path=cp_generator_path, max_cp_to_keep=5,
                 print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=1)
 
+# Todo: input_vocab_size = tokenizer_pt.vocab_size + 2; target_vocab_size = tokenizer_en.vocab_size + 2
 # Todo: save tk!!!
 # Todo: summarize and get unique notes!!!!
 

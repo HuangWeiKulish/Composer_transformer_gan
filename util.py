@@ -35,14 +35,15 @@ def softargmax(x, beta=1e10):
     return tf.reduce_sum(tf.nn.softmax(x*beta) * x_range, axis=-1)
 
 
-def number_encode_text(x, tk):
+def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
     # x: (batch, length, 4); 4 columns: [notes in text format, velocity, time since last start, notes duration]
     # ------------- encode notes from text to integer --------------
     x_0 = tk.texts_to_sequences(x[:, :, 0].tolist())
-    return np.append(np.expand_dims(x_0, axis=-1), x[:, :, 1:], axis=-1).astype(np.float32)
+    return np.stack([np.array(x_0), np.divide(x[:, :, 1], vel_norm),
+                     np.divide(x[:, :, 2], tmps_norm), np.divide(x[:, :, 3], dur_norm)], axis=-1).astype(np.float32)
 
 
-def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50,
+def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
                    pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
     # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
     # tk = pkl.load(open(tk_path, 'rb'))
@@ -56,11 +57,16 @@ def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50,
          x_tar,
          np.expand_dims(np.array([['<end>', 0, 0, 0]] * batch, dtype=object), axis=1)], axis=1)
 
-    x_in_ = number_encode_text(x_in, tk)
-    x_tar_ = number_encode_text(x_tar, tk)
+    x_in_ = number_encode_text(x_in, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
+    x_tar_ = number_encode_text(x_tar, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
     dataset = tf.data.Dataset.from_tensor_slices((x_in_, x_tar_[:, :-1, :], x_tar_[:, 1:, :])).cache()
     dataset = dataset.shuffle(x_in.shape[0]+1).batch(batch_size)
-    return tk, dataset
+    return dataset
+
+
+
+
+
 
 
 def inds2notes(tk, nid, default='p'):
