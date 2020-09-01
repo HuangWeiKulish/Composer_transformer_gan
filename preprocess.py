@@ -238,16 +238,16 @@ class Conversion:
             result[:, note_id_col] = [{x} for x in all_notes_[:, note_id_col].astype(int)]
         return result
 
-    # @staticmethod
-    # def chords_limit(all_notes, max=10):
-    #     # all_notes: np 2d array, columns: [notes, velocity, start_tick, end_tick, start_time, end_time]
-    #     all_notes_ = all_notes.copy()
-    #     for i in range(len(all_notes_)):
-    #         if len(all_notes_[i][0]) > max:
-    #             l_ = list(all_notes_[i][0])
-    #             l_.sort()
-    #             all_notes_[i][0] = set(l_[(len(all_notes_[i][0])-max):])
-    #     return all_notes_
+    @staticmethod
+    def chords_limit(all_notes, max=10):
+        # all_notes: np 2d array, columns: [notes, velocity, start_tick, end_tick, start_time, end_time]
+        all_notes_ = all_notes.copy()
+        for i in range(len(all_notes_)):
+            if len(all_notes_[i][0]) > max:
+                l_ = list(all_notes_[i][0])
+                l_.sort()
+                all_notes_[i][0] = set(l_[(len(all_notes_[i][0])-max):])
+        return all_notes_
 
     @staticmethod
     def encode_notes(all_notes, use_time=True):
@@ -312,7 +312,7 @@ class Conversion:
             all_notes = Conversion.combine_notes_same_on_off(
                 all_notes, thres_pctdur=thres_noteset_pctdur, thres_s=thres_noteset_s, clean=True)
             # all_notes (np 2d array): [note_id, velocity, strt_tk, end_tk, strt_tm, end_tm]
-            # all_notes = Conversion.chords_limit(all_notes, max=chords_nmax)
+            all_notes = Conversion.chords_limit(all_notes, max=chords_nmax)
         else:
             all_notes = Conversion.combine_notes_same_on_off(
                 notes, thres_pctdur=0.4, thres_s=0.5, clean=False)
@@ -414,6 +414,7 @@ def notes_indexing(
             filenm, extn = os.path.splitext(nm)
             if extn.lower() == '.pkl':
                 ary = pkl.load(open(os.path.join(sb, nm), 'rb'))
+                print(os.path.join(sb, nm))
                 tk.fit_on_texts(ary[:, 0].tolist())
                 if print_num:
                     print('Number notes: {}'.format(len(json.loads(tk.get_config()['word_counts']))))
@@ -425,7 +426,7 @@ notes_indexing(
         array_path='/Users/Wei/Desktop/midi_train/arry', 
         tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict.pkl',
         print_num=True)
-# total: 
+# total: 152993
 """
 
 
@@ -603,6 +604,7 @@ class ReplaceNotes:
 
         result = []
         for i, nt in enumerate(infq_nts):
+            # print(nt)
             result.append(ReplaceNotes.find_notes_replacement(nt, frq_nts_cnt))
             if show_progress:
                 if (i+1) % progress_step == 0:
@@ -690,7 +692,8 @@ notes_indexing(
         array_path='/Users/Wei/Desktop/midi_train/arry_modified', 
         tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_mod.pkl',
         print_num=True)
-        
+
+tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_mod.pkl'       
 tk = pkl.load(open(tk_path, 'rb'))
 len(json.loads(tk.get_config()['word_counts']))  # 15000
 """
@@ -736,27 +739,16 @@ class DataPreparation:
         return np.array(x_in, dtype=object), np.array(x_tar, dtype=object)
 
 
-
 """
-import os
-
-midifile_path = '/Users/Wei/Desktop/midi_train/midi/chopin'
-mid = mido.MidiFile(os.path.join(midifile_path, 'ballade_op_23_no_1_a_(nc)smythe.mid'), clip=True)
-ary = Conversion.mid2arry(mid, default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.2,
-                 thres_noteset_pctdur=0.3, thres_noteset_s=0.5, use_time=True)
-new_mid = Conversion.arry2mid(ary, tempo=500000, ticks_per_beat=120, use_time=True)
-new_mid.save('/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/new_mid.mid')
+# test function
+in_seq_len = 16
+out_seq_len = 64
+x_in, x_tar = DataPreparation.batch_preprocessing(in_seq_len, out_seq_len, step=60,
+                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
+print(x_in.shape)
+print(x_tar.shape)
 """
 
-"""
-filepath = '/Users/Wei/Desktop/piano_classic/Chopin_array/valse_70_2_(c)dery.pkl'
-import pickle as pkl
-filename = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/result/50_0.pkl'
-file = pkl.load(open(filename, 'rb')).toarray()*80
-np.unique(file)
 
-mid_new = Conversion.arry2mid(file.astype(int), 50)
-mid_new.save('sample.mid')
-"""
 
 
