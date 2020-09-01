@@ -50,7 +50,6 @@ class Transformer(tf.keras.Model):
                  fc_layers=2, norm_epsilon=1e-6, dropout_rate=0.2, fc_activation="relu", type_='melody'):
         super(Transformer, self).__init__()
         assert embed_dim % n_heads == 0
-        # self.embed_dim = embed_dim
         self.n_heads = n_heads
         self.depth = embed_dim // n_heads
         self.encoder_layers = encoder_layers
