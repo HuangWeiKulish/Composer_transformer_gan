@@ -8,8 +8,8 @@ tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
-def latant_vector(n_samples, input_dim, mean_=0.0, std_=1.1):
-    return np.random.normal(mean_, std_, size=[n_samples, input_dim, 2])
+def latant_vector(n_samples, dim1, dim2, mean_=0.0, std_=1.1):
+    return np.random.normal(mean_, std_, size=[n_samples, dim1, dim2])
 
 
 def padding_mask(x_):
@@ -39,8 +39,8 @@ def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
     # x: (batch, length, 4); 4 columns: [notes in text format, velocity, time since last start, notes duration]
     # ------------- encode notes from text to integer --------------
     x_0 = tk.texts_to_sequences(x[:, :, 0].tolist())
-    return np.stack([np.array(x_0), np.divide(x[:, :, 1], vel_norm),
-                     np.divide(x[:, :, 2], tmps_norm), np.divide(x[:, :, 3], dur_norm)], axis=-1).astype(np.float32)
+    return np.append(np.expand_dims(x_0, axis=-1),
+                     np.divide(x[:, :, 1:], np.array([vel_norm, tmps_norm, dur_norm])), axis=-1).astype(np.float32)
 
 
 def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
@@ -64,6 +64,18 @@ def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm
     return dataset
 
 
+"""
+import pickle as pkl
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
+tk = pkl.load(open(tk_path, 'rb'))
+
+in_seq_len, out_seq_len = 16, 64
+dataset = load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, 
+dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
+
+x_in, x_tar_in, x_tar_out = list(dataset.prefetch(1).as_numpy_iterator())[0]
+
+"""
 
 
 
