@@ -47,7 +47,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
 class Transformer(tf.keras.Model):
 
     def __init__(self, embed_dim=256, n_heads=4, out_notes_pool_size=1000, encoder_layers=2, decoder_layers=2,
-                 fc_layers=2, norm_epsilon=1e-6, dropout_rate=0.2, fc_activation="relu", type_='melody'):
+                 fc_layers=2, norm_epsilon=1e-6, dropout_rate=0.2, fc_activation="relu"):
         super(Transformer, self).__init__()
         assert embed_dim % n_heads == 0
         self.n_heads = n_heads
@@ -79,11 +79,12 @@ class Transformer(tf.keras.Model):
         self.ln3_de = tf.keras.layers.LayerNormalization(epsilon=norm_epsilon)
 
         # layer for output --------------------------
-        self.final = tf.keras.layers.Dense(out_notes_pool_size) if type_ == 'melody' else tf.keras.layers.Dense(1)
+        self.final = tf.keras.layers.Dense(out_notes_pool_size)
 
     def call(self, x_en, x_de, mask_padding, mask_lookahead):
         # x_en: (batch, en_time_in, embed_dim)
         # x_de: (batch, de_time_in, embed_dim)
+
         # --------------------------- encoder ---------------------------
         x_en_ = x_en
         for i in range(self.encoder_layers):
@@ -99,7 +100,7 @@ class Transformer(tf.keras.Model):
 
         # --------------------------- output ---------------------------
         # if type_ == 'melody': out: (batch, de_time_in, out_notes_pool_size)
-        # else: out: (batch, de_time_in, 1)
+        # else: out: (batch, de_time_in, 3)  [velocity, time_passed_since_last_start, duration]
         out = self.final(x_de_)
         return out, all_weights
 
