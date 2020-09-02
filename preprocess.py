@@ -418,7 +418,7 @@ batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
 
 def notes_indexing(
         array_path='/Users/Wei/Desktop/midi_train/arry',
-        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict.pkl',
+        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict.pkl',
         print_num=True):
     try:
         tk = pkl.load(open(tk_path, 'rb'))
@@ -441,7 +441,7 @@ def notes_indexing(
 """
 notes_indexing(
         array_path='/Users/Wei/Desktop/midi_train/arry', 
-        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict.pkl',
+        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict.pkl',
         print_num=True)
 # total: 152993
 """
@@ -643,7 +643,7 @@ class ReplaceNotes:
 
 
 """
-tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict.pkl'
+tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict.pkl'
 tk = pkl.load(open(tk_path, 'rb'))
 
 nts_cnt = ReplaceNotes.get_notes_frequency(tk)
@@ -659,7 +659,7 @@ notes_replacement = ReplaceNotes.get_notes_replacement(notes_replacement)
     
     
 # save notes_replacement:
-nt_rp_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_replacement.pkl'
+nt_rp_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_replacement.pkl'
 pkl.dump(notes_replacement, open(nt_rp_path, 'wb'))
 """
 
@@ -700,7 +700,7 @@ def batch_replace_infreq_nts(
 
 
 """
-nt_rp_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_replacement.pkl'
+nt_rp_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_replacement.pkl'
 notes_replacement = pkl.load(open(nt_rp_path, 'rb'))
 batch_replace_infreq_nts(
         notes_replacement, array_path='/Users/Wei/Desktop/midi_train/arry',
@@ -709,17 +709,17 @@ batch_replace_infreq_nts(
 # indexing notes again!
 notes_indexing(
         array_path='/Users/Wei/Desktop/midi_train/arry_modified', 
-        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_mod.pkl',
+        tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_mod.pkl',
         print_num=True)
 
-tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_mod.pkl'       
+tk_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_mod.pkl'       
 tk = pkl.load(open(tk_path, 'rb'))
 print(len(json.loads(tk.get_config()['word_counts'])))  # 15000
 
 tk.fit_on_texts(['<start>', '<end>'])
 print(len(json.loads(tk.get_config()['word_counts'])))  # 15002
 
-tk_path_final='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'       
+tk_path_final='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_final.pkl'       
 pkl.dump(tk, open(tk_path_final, 'wb'))
 
 """
