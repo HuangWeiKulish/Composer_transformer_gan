@@ -364,6 +364,19 @@ class Conversion:
         return mid_new
 
 
+"""
+# mid = mido.MidiFile('/Users/Wei/Desktop/midi_train/midi/albeniz/albeniz_autumne_waltz_(c)halstead.mid', clip=True)
+# arry_ = Conversion.mid2arry(mid, default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.3,
+#                  thres_noteset_pctdur=0.3, thres_noteset_s=0.5, chords_nmax=10, use_time=True)
+
+pth = '/Users/Wei/Desktop/midi_train/arry/albeniz/albeniz_autumne_waltz_(c)halstead.pkl'
+arry_ = pkl.load(open(pth, 'rb'))
+mid_new = Conversion.arry2mid(arry_, tempo=500000, ticks_per_beat=120, use_time=True)
+mid_new.save('sample.mid')
+"""
+
+
+
 def batch_convert_midi2arry(midifile_path='/Users/Wei/Desktop/midi_train/midi',
                             array_path='/Users/Wei/Desktop/midi_train/arry',
                             default_tempo=500000, clean=True, thres_strt_gap=0.2, thres_strt_pctdur=0.2,
