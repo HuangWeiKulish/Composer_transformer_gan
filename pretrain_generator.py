@@ -8,54 +8,61 @@ import pickle as pkl
 tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
-cp_embedder_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/embedder'
-cp_generator_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/generator'
+notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/notes_embedder'
+notes_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/notes_generator'
+time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/time_generator'
+
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_final.pkl'
+tk = pkl.load(open(tk_path, 'rb'))
+notes_pool_size = len(json.loads(tk.get_config()['word_counts']))
+print(notes_pool_size)
 
 in_seq_len, out_seq_len = 16, 64
 
-tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
-tk = pkl.load(open(tk_path, 'rb'))
-tk, dataset = util.load_true_data(
-    tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
-    pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
-
-notes_pool_size = len(json.loads(tk.get_config()['word_counts']))
+dataset = util.load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12,
+    dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
 
 
-
-
-
-
-
-
-generator = generator.GeneratorPretrain(
-    en_max_pos=5000, de_max_pos=10000, embed_dim=256, n_heads=4, in_notes_pool_size=notes_pool_size,
-    out_notes_pool_size=notes_pool_size,
+notes_gen = generator.PretrainGenerator(
+    out_notes_pool_size=15002, embed_dim=256, n_heads=4, max_pos=800, time_features=3,
     fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
-    transformer_dropout_rate=0.2, embedding_dropout_rate=0.2, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
+    embedding_dropout_rate=0.2, transformer_dropout_rate=0.2, mode_='notes')
 
-generator.train(epochs=1, dataset=dataset, notes_dur_loss_weight=(1, 1), save_model_step=1,
-                cp_embedder_path=cp_embedder_path, cp_generator_path=cp_generator_path, max_cp_to_keep=5,
-                print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=1)
+notes_gen.train(dataset, epochs=5, nt_tm_loss_weight=(1, 1), save_model_step=10,
+                notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
+                max_to_keep=5, print_batch=True, print_batch_step=1, print_epoch=True, print_epoch_step=1)
 
-# Todo: input_vocab_size = tokenizer_pt.vocab_size + 2; target_vocab_size = tokenizer_en.vocab_size + 2
-# Todo: save tk!!!
-# Todo: summarize and get unique notes!!!!
+
 
 """
-dur_denorm=20
-x, _, _ = list(dataset.prefetch(1).as_numpy_iterator())[0]
-notes_dur = [[util.inds2notes(tk, nid, default='p'), dur * dur_denorm] for nid, dur in
-             zip(x[0, :, 0], x[0, :, 1])]  # [[notes1, dur1], ...] for all batches 
-notes_dur = np.expand_dims(np.array(notes_dur, dtype=object), axis=0)
-generator.predict(x_in=notes_dur, tk=tk, out_seq_len=64, dur_denorm=20)
 
-# -----------------
-tmp = util.number_encode_text(notes_dur, tk, dur_norm=20)
-tmp = generator.embedder_en(tmp)
+x_in, x_tar_in, x_tar_out = list(dataset.prefetch(1).as_numpy_iterator())[0]
 
-import matplotlib.pyplot as plt
-plt.hist(tmp.numpy().flatten(), bins=50)
+out_notes_pool_size=15002
+embed_dim=256
+n_heads=4
+max_pos=800
+time_features=3
+fc_activation="relu"
+encoder_layers=2
+decoder_layers=2
+fc_layers=3
+norm_epsilon=1e-6
+embedding_dropout_rate=0.2
+transformer_dropout_rate=0.2
+mode_='notes'
+
+epochs=5
+nt_tm_loss_weight=(1, 1)
+save_model_step=10
+max_to_keep=5
+print_batch=True
+print_batch_step=1
+print_epoch=True
+print_epoch_step=1
+lr_tm=0.01
+warmup_steps=4000
+optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
 """
 
 
