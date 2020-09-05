@@ -67,12 +67,12 @@ class NotesLatent(tf.keras.Model):
         return self.fcs(x_in)
 
 
-class OtherLatent(tf.keras.Model):
+class TimeLatent(tf.keras.Model):
 
     def __init__(self, nlayers=4):
         # generate latent vector of dimension; (batch, in_seq_len, in_features)
         # example: input random vector (batch, 16) ==> output latent vector (batch, 16, 256)
-        super(OtherLatent, self).__init__()
+        super(TimeLatent, self).__init__()
         self.fcs = tf.keras.models.Sequential(
             [tf.keras.layers.Conv1D(filters=4, kernel_size=3, padding='same') for i in range(1, nlayers+1)])
 
@@ -138,7 +138,7 @@ class Generator(tf.keras.Model):
         result = np.transpose(np.array(result, dtype=object), (1, 0))  # (batch, out_seq_len)
         return result  # notes string
 
-    def predict_other(self, x_en, out_seq_len, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3, return_denorm=True):
+    def predict_time(self, x_en, out_seq_len, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3, return_denorm=True):
         # x_en: (batch_size, in_seq_len, 3)
         batch_size = x_en.shape[0]
         # init x_de: (batch_size, 1, 3)
@@ -156,6 +156,161 @@ class Generator(tf.keras.Model):
         if return_denorm:
             result = result * np.array([vel_norm, tmps_norm, dur_norm])
         return result
+
+
+class PretrainGenerator(tf.keras.Model):
+
+    def __init__(self, out_notes_pool_size=15002, embed_dim=256, n_heads=4, max_pos=800, time_features=3,
+                 fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
+                 embedding_dropout_rate=0.2, transformer_dropout_rate=0.2, mode_='notes'):
+        super(PretrainGenerator, self).__init__()
+        self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
+
+        self.notes_emb = NotesEmbedder(
+            notes_pool_size=out_notes_pool_size, max_pos=max_pos, embed_dim=embed_dim,
+            dropout_rate=embedding_dropout_rate) if mode_ == 'notes' else None
+        self.notes_gen = transformer.Transformer(
+            embed_dim=embed_dim, n_heads=n_heads, out_notes_pool_size=out_notes_pool_size,
+            encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
+            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation) \
+            if mode_ == 'notes' else None
+        # 3 for [velocity, velocity, time since last start, notes duration]
+        self.time_gen = transformer.Transformer(
+            embed_dim=time_features, n_heads=1, out_notes_pool_size=time_features,
+            encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
+            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation) \
+            if mode_ == 'time' else None
+
+    def call(self, x_en_nt, x_de_nt, x_en_tm, x_de_tm, mask_padding, mask_lookahead):
+        if self.mode_ == 'notes':
+            # x_en_tm, x_de_tm = None, None
+            # x_en_nt: (batch, in_seq_len, embed_dim)
+            # x_de_nt: (batch, out_seq_len, embed_dim)
+            # x_out_nt: (batch, out_seq_len, out_notes_pool_size)
+            x_out_nt, all_weights_nt = self.notes_gen(
+                x_en=x_en_nt, x_de=x_de_nt, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+            return x_out_nt, all_weights_nt
+        elif self.mode_ == 'time':
+            # x_en_nt, x_de_nt = None, None
+            # x_en_tm: (batch, in_seq_len, 3)
+            # x_de_tm: (batch, out_seq_len, 3)
+            # x_out_tm: (batch, out_seq_len, 3)
+            x_out_tm, all_weights_tm = self.notes_gen(
+                x_en=x_en_tm, x_de=x_de_tm, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+            return x_out_tm, all_weights_tm
+        else:  # self.mode_ == 'both'
+            # x_en_nt: (batch, in_seq_len, embed_dim)
+            # x_de_nt: (batch, out_seq_len, embed_dim)
+            # x_out_nt: (batch, out_seq_len, out_notes_pool_size)
+            # x_en_tm: (batch, in_seq_len, 3)
+            # x_de_tm: (batch, out_seq_len, 3)
+            # x_out_tm: (batch, out_seq_len, 3)
+            x_out_nt, all_weights_nt = self.notes_gen(
+                x_en=x_en_nt, x_de=x_de_nt, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+            x_out_tm, all_weights_tm = self.notes_gen(
+                x_en=x_en_tm, x_de=x_de_tm, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+            return x_out_nt, all_weights_nt, x_out_tm, all_weights_tm
+
+    def predict_notes(self, x_en, tk, out_seq_len, return_str=True):
+        # emb_model is the embedding model
+        # x_en: (batch_size, in_seq_len, embed_dim)
+        # x_de: batch_size, 1, embed_dim)
+        batch_size = x_en.shape[0]
+        x_de = tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
+        x_de = self.notes_emb(x_de)
+        result = []  # (out_seq_len, batch)
+        for i in range(out_seq_len):
+            mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
+            mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
+            # x_out: (batch_size, 1, out_notes_pool_size)
+            x_out, _ = self.notes_gen(x_en=x_en, x_de=x_de, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+            # translate prediction to text
+            pred = tf.argmax(x_out, -1)
+            pred = [nid for nid in pred.numpy()[:, -1]]  # len = batch, take the last prediction
+            # append pred to x_de:
+            x_de = tf.concat((x_de, self.notes_emb(np.expand_dims(pred, axis=-1))), axis=1)
+            if return_str:
+                # !! use pd + 1 because tk index starts from 1
+                result.append([tk.index_word[pd + 1] for pd in pred])  # return notes string
+            else:
+                result.append(pred)  # return notes index
+        result = np.transpose(np.array(result, dtype=object), (1, 0))  # (batch, out_seq_len)
+        return result  # notes string
+
+    def predict_time(self, x_en, out_seq_len, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3, return_denorm=True):
+        # x_en: (batch_size, in_seq_len, 3)
+        batch_size = x_en.shape[0]
+        # init x_de: (batch_size, 1, 3)
+        x_de = tf.constant([[[0] * 3]] * batch_size, dtype=tf.float32)
+        result = []  # (out_seq_len, batch, 3)
+        for i in range(out_seq_len):
+            mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
+            mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
+            # x_out: (batch_size, 1, 3)
+            x_out, _ = self.time_gen(x_en=x_en, x_de=x_de, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+            pred = x_out[:, -1, :][:, tf.newaxis, :]  # only take the last prediction
+            x_de = tf.concat((x_de, pred), axis=1)
+            result.append(x_out[:, -1, :].numpy().tolist())  # only take the last prediction
+        result = np.transpose(np.array(result, dtype=object), (1, 0, 2))  # (batch, out_seq_len, 3)
+        if return_denorm:
+            result = result * np.array([vel_norm, tmps_norm, dur_norm])
+        return result
+
+    def train_step(self, x_in, x_tar_in, x_tar_out, notes_dur_loss_weight=(1, 1)):
+        # x_in: numpy 3d array (batch, in_seq_len, 4):
+        # x_tar_in: numpy 3d array (batch, out_seq_len, 4)
+        # x_tar_out: numpy 3d array (batch, out_seq_len, 4)
+        #   columns: notes_id (int), velocity, time_passed_since_last_note, notes_duration
+        with tf.GradientTape() as tape:
+            if self.mode_ in ['notes', 'both']:
+                #  x_in_nt: (batch, in_seq_len)
+                #  x_tar_in_nt: (batch, out_seq_len)
+                #  x_tar_out_nt: (batch, out_seq_len)
+                x_in_nt, x_tar_in_nt, x_tar_out_nt = x_in[:, :, 0], x_tar_in[:, :, 0], x_tar_out[:, :, 0]
+                #  x_in_nt: (batch, in_seq_len, embed_dim)
+                #  x_tar_in_nt: (batch, out_seq_len, embed_dim)
+                #  x_tar_out_nt: (batch, out_seq_len, embed_dim)
+                x_in_nt, x_tar_in_nt, x_tar_out_nt = notes_emb(x_in_nt), notes_emb(x_tar_in_nt), notes_emb(x_tar_out_nt)
+
+
+
+
+                #  x_in_tm: (batch, in_seq_len, 3)
+            #  x_tar_in_tm: (batch, out_seq_len, 3)
+            #  x_tar_out_tm: (batch, out_seq_len, 3)
+            x_in_tm, x_tar_in_tm, x_tar_out_tm = x_in[:, :, 1:], x_tar_in[:, :, 1:], x_tar_out[:, :, 1:]
+
+
+
+
+
+
+
+            x_en_melody = self.notes_emb(x_in)  # (batch, in_seq_len, embed_dim)
+            x_en_duration = x_in[:, :, 1][:, :, tf.newaxis]  # get the duration (batch, in_seq_len)
+            mask_padding = None  # util.padding_mask(x_in[:, :, 0])  # (batch, 1, 1, seq_len)
+            mask_lookahead = util.lookahead_mask(x_tar_in.shape[1])  # (seq_len, seq_len)
+
+            # ------------------ predict ------------------------
+            # x_out_melody: (batch, out_seq_len, out_notes_pool_size)
+            # x_out_duration: (batch, out_seq_len, 1)
+            x_out_melody, all_weights_melody, x_out_duration, all_weights_duration = self.generator(
+                x_en_melody, x_en_duration, x_tar_in, mask_padding, mask_lookahead)
+
+            # ------------------ calculate loss ------------------------
+            loss_notes = util.loss_func_notes(x_tar_out[:, :, 0], x_out_melody)
+            loss_duration = util.loss_func_duration(x_tar_out[:, :, 1], x_out_duration[:, :, 0])
+            loss_combine = (loss_notes * notes_dur_loss_weight[0] +
+                            loss_duration * notes_dur_loss_weight[1]) / sum(notes_dur_loss_weight)
+
+        variables = self.embedder_en.trainable_variables + self.generator.trainable_variables
+        gradients = tape.gradient(loss_combine, variables)
+        self.optimizer.apply_gradients(zip(gradients, variables))
+        self.train_loss(loss_combine)
+
+        return loss_notes, loss_duration, loss_combine
+
+
 
 
 """
@@ -262,20 +417,11 @@ x_en.shape
 #                 cp_manager_generator.save()
 #                 print('Saved the latest generator')
 #
-#     def predict(self, x_in, tk, out_seq_len, dur_denorm=20):
-#         # x_in: (batch, in_seq_len, 2), 2 columns: [notes (string), duration (int)]
-#         x_in_ = util.number_encode_text(x=x_in, tk=tk, dur_norm=dur_denorm).astype(np.float32)  # string to int id
-#         x_en_melody = self.embedder_en(x_in_)  # (batch, in_seq_len, embed_dim)
-#         x_en_duration = x_in_[:, :, 1][:, :, tf.newaxis]  # get the duration (batch, in_seq_len, 1)
-#
-#         # result: (batch, out_seq_len, 2); 2 columns: [notes1 (string), dur1 (int)]
-#         result = self.generator.predict(x_en_melody=x_en_melody, x_en_duration=x_en_duration, tk=tk,
-#                                         out_seq_len=out_seq_len, dur_denorm=dur_denorm)
-#         return result
+
 
 
 """
-de_max_pos=8000
+max_pos=800
 embed_dim=256
 n_heads=4
 out_notes_pool_size=15002
