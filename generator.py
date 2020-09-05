@@ -7,8 +7,9 @@ import transformer
 tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
-cp_embedder_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/embedder'
-cp_generator_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/generator'
+notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/notes_embedder'
+notes_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/notes_generator'
+time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/time_generator'
 
 
 class NotesEmbedder(tf.keras.Model):
@@ -81,82 +82,82 @@ class TimeLatent(tf.keras.Model):
         return self.fcs(x_in)
 
 
-class Generator(tf.keras.Model):
-
-    def __init__(self, fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
-                 transformer_dropout_rate=0.2, mode_='notes'):
-        super(Generator, self).__init__()
-        #assert embed_dim % n_heads == 0
-        if mode_ == 'notes':
-            embed_dim = 256
-            n_heads = 4
-            out_notes_pool_size = 15002
-        else:
-            # 3 for [velocity, velocity, time since last start, notes duration]
-            embed_dim = 3
-            n_heads = 1
-            out_notes_pool_size = 3
-        self.gen = transformer.Transformer(
-            embed_dim=embed_dim, n_heads=n_heads, out_notes_pool_size=out_notes_pool_size,
-            encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
-            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation)
-
-    def call(self, x_en, x_de, mask_padding, mask_lookahead):
-        # if mode_ == 'notes'
-        #   x_en: (batch, in_seq_len, embed_dim)
-        #   x_de: (batch, out_seq_len, embed_dim)
-        #   x_out: (batch, out_seq_len, out_notes_pool_size)
-        # else:
-        #   x_en: (batch, in_seq_len, 3)
-        #   x_de: (batch, out_seq_len, 3)
-        #   x_out: (batch, out_seq_len, 3)
-        x_out, all_weights = self.gen(x_en=x_en, x_de=x_de, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
-        return x_out, all_weights
-
-    def predict_notes(self, x_en, tk, emb_model, out_seq_len, return_str=True):
-        # emb_model is the embedding model
-        # x_en: (batch_size, in_seq_len, embed_dim)
-        # x_de: batch_size, 1, embed_dim)
-        batch_size = x_en.shape[0]
-        x_de = tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
-        x_de = emb_model(x_de)
-        result = []  # (out_seq_len, batch)
-        for i in range(out_seq_len):
-            mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
-            mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
-            # x_out: (batch_size, 1, out_notes_pool_size)
-            x_out, _ = self.gen(x_en=x_en, x_de=x_de, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
-            # translate prediction to text
-            pred = tf.argmax(x_out, -1)
-            pred = [nid for nid in pred.numpy()[:, -1]]  # len = batch, take the last prediction
-            # append pred to x_de:
-            x_de = tf.concat((x_de, emb_model(np.expand_dims(pred, axis=-1))), axis=1)
-            if return_str:
-                result.append([tk.index_word[pd] for pd in pred])  # return notes string
-            else:
-                result.append(pred)  # return notes index
-        result = np.transpose(np.array(result, dtype=object), (1, 0))  # (batch, out_seq_len)
-        return result  # notes string
-
-    def predict_time(self, x_en, out_seq_len, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3, return_denorm=True):
-        # x_en: (batch_size, in_seq_len, 3)
-        batch_size = x_en.shape[0]
-        # init x_de: (batch_size, 1, 3)
-        x_de = tf.constant([[[0] * 3]] * batch_size, dtype=tf.float32)
-        result = []  # (out_seq_len, batch, 3)
-        for i in range(out_seq_len):
-            mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
-            mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
-            # x_out: (batch_size, 1, 3)
-            x_out, _ = self.gen(x_en=x_en, x_de=x_de, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
-            pred = x_out[:, -1, :][:, tf.newaxis, :]  # only take the last prediction
-            x_de = tf.concat((x_de, pred), axis=1)
-            result.append(x_out[:, -1, :].numpy().tolist())  # only take the last prediction
-        result = np.transpose(np.array(result, dtype=object), (1, 0, 2))  # (batch, out_seq_len, 3)
-        if return_denorm:
-            result = result * np.array([vel_norm, tmps_norm, dur_norm])
-        return result
-
+# class Generator(tf.keras.Model):
+#
+#     def __init__(self, fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
+#                  transformer_dropout_rate=0.2, mode_='notes'):
+#         super(Generator, self).__init__()
+#         #assert embed_dim % n_heads == 0
+#         if mode_ == 'notes':
+#             embed_dim = 256
+#             n_heads = 4
+#             out_notes_pool_size = 15002
+#         else:
+#             # 3 for [velocity, velocity, time since last start, notes duration]
+#             embed_dim = 3
+#             n_heads = 1
+#             out_notes_pool_size = 3
+#         self.gen = transformer.Transformer(
+#             embed_dim=embed_dim, n_heads=n_heads, out_notes_pool_size=out_notes_pool_size,
+#             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
+#             norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation)
+#
+#     def call(self, x_en, x_de, mask_padding, mask_lookahead):
+#         # if mode_ == 'notes'
+#         #   x_en: (batch, in_seq_len, embed_dim)
+#         #   x_de: (batch, out_seq_len, embed_dim)
+#         #   x_out: (batch, out_seq_len, out_notes_pool_size)
+#         # else:
+#         #   x_en: (batch, in_seq_len, 3)
+#         #   x_de: (batch, out_seq_len, 3)
+#         #   x_out: (batch, out_seq_len, 3)
+#         x_out, all_weights = self.gen(x_en=x_en, x_de=x_de, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+#         return x_out, all_weights
+#
+#     def predict_notes(self, x_en, tk, emb_model, out_seq_len, return_str=True):
+#         # emb_model is the embedding model
+#         # x_en: (batch_size, in_seq_len, embed_dim)
+#         # x_de: batch_size, 1, embed_dim)
+#         batch_size = x_en.shape[0]
+#         x_de = tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
+#         x_de = emb_model(x_de)
+#         result = []  # (out_seq_len, batch)
+#         for i in range(out_seq_len):
+#             mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
+#             mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
+#             # x_out: (batch_size, 1, out_notes_pool_size)
+#             x_out, _ = self.gen(x_en=x_en, x_de=x_de, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+#             # translate prediction to text
+#             pred = tf.argmax(x_out, -1)
+#             pred = [nid for nid in pred.numpy()[:, -1]]  # len = batch, take the last prediction
+#             # append pred to x_de:
+#             x_de = tf.concat((x_de, emb_model(np.expand_dims(pred, axis=-1))), axis=1)
+#             if return_str:
+#                 result.append([tk.index_word[pd] for pd in pred])  # return notes string
+#             else:
+#                 result.append(pred)  # return notes index
+#         result = np.transpose(np.array(result, dtype=object), (1, 0))  # (batch, out_seq_len)
+#         return result  # notes string
+#
+#     def predict_time(self, x_en, out_seq_len, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3, return_denorm=True):
+#         # x_en: (batch_size, in_seq_len, 3)
+#         batch_size = x_en.shape[0]
+#         # init x_de: (batch_size, 1, 3)
+#         x_de = tf.constant([[[0] * 3]] * batch_size, dtype=tf.float32)
+#         result = []  # (out_seq_len, batch, 3)
+#         for i in range(out_seq_len):
+#             mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
+#             mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
+#             # x_out: (batch_size, 1, 3)
+#             x_out, _ = self.gen(x_en=x_en, x_de=x_de, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+#             pred = x_out[:, -1, :][:, tf.newaxis, :]  # only take the last prediction
+#             x_de = tf.concat((x_de, pred), axis=1)
+#             result.append(x_out[:, -1, :].numpy().tolist())  # only take the last prediction
+#         result = np.transpose(np.array(result, dtype=object), (1, 0, 2))  # (batch, out_seq_len, 3)
+#         if return_denorm:
+#             result = result * np.array([vel_norm, tmps_norm, dur_norm])
+#         return result
+#
 
 class PretrainGenerator(tf.keras.Model):
 
@@ -165,6 +166,7 @@ class PretrainGenerator(tf.keras.Model):
                  embedding_dropout_rate=0.2, transformer_dropout_rate=0.2, mode_='notes'):
         super(PretrainGenerator, self).__init__()
         self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
+        self.embed_dim = embed_dim
 
         self.notes_emb = NotesEmbedder(
             notes_pool_size=out_notes_pool_size, max_pos=max_pos, embed_dim=embed_dim,
@@ -195,7 +197,7 @@ class PretrainGenerator(tf.keras.Model):
             # x_en_tm: (batch, in_seq_len, 3)
             # x_de_tm: (batch, out_seq_len, 3)
             # x_out_tm: (batch, out_seq_len, 3)
-            x_out_tm, all_weights_tm = self.notes_gen(
+            x_out_tm, all_weights_tm = self.time_gen(
                 x_en=x_en_tm, x_de=x_de_tm, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
             return x_out_tm, all_weights_tm
         else:  # self.mode_ == 'both'
@@ -207,7 +209,7 @@ class PretrainGenerator(tf.keras.Model):
             # x_out_tm: (batch, out_seq_len, 3)
             x_out_nt, all_weights_nt = self.notes_gen(
                 x_en=x_en_nt, x_de=x_de_nt, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
-            x_out_tm, all_weights_tm = self.notes_gen(
+            x_out_tm, all_weights_tm = self.time_gen(
                 x_en=x_en_tm, x_de=x_de_tm, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
             return x_out_nt, all_weights_nt, x_out_tm, all_weights_tm
 
@@ -256,12 +258,15 @@ class PretrainGenerator(tf.keras.Model):
             result = result * np.array([vel_norm, tmps_norm, dur_norm])
         return result
 
-    def train_step(self, x_in, x_tar_in, x_tar_out, notes_dur_loss_weight=(1, 1)):
+    def train_step(self, x_in, x_tar_in, x_tar_out, nt_tm_loss_weight=(1, 1)):
         # x_in: numpy 3d array (batch, in_seq_len, 4):
         # x_tar_in: numpy 3d array (batch, out_seq_len, 4)
         # x_tar_out: numpy 3d array (batch, out_seq_len, 4)
         #   columns: notes_id (int), velocity, time_passed_since_last_note, notes_duration
         with tf.GradientTape() as tape:
+            mask_padding = None  # util.padding_mask(x_in[:, :, 0])  # (batch, 1, 1, seq_len)
+            mask_lookahead = util.lookahead_mask(x_tar_in.shape[1])  # (seq_len, seq_len)
+
             if self.mode_ in ['notes', 'both']:
                 #  x_in_nt: (batch, in_seq_len)
                 #  x_tar_in_nt: (batch, out_seq_len)
@@ -270,47 +275,105 @@ class PretrainGenerator(tf.keras.Model):
                 #  x_in_nt: (batch, in_seq_len, embed_dim)
                 #  x_tar_in_nt: (batch, out_seq_len, embed_dim)
                 #  x_tar_out_nt: (batch, out_seq_len, embed_dim)
-                x_in_nt, x_tar_in_nt, x_tar_out_nt = notes_emb(x_in_nt), notes_emb(x_tar_in_nt), notes_emb(x_tar_out_nt)
+                x_in_nt, x_tar_in_nt, x_tar_out_nt = \
+                    self.notes_emb(x_in_nt), self.notes_emb(x_tar_in_nt), self.notes_emb(x_tar_out_nt)
+                # x_out_nt_pr: (batch, out_seq_len, out_notes_pool_size)
+                x_out_nt_pr, _ = self.notes_gen(
+                    x_en=x_in_nt, x_de=x_tar_in_nt, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+                loss_notes = util.loss_func_notes(x_tar_out[:, :, 0], x_out_nt_pr)
+                variables_notes = self.notes_emb.trainable_variables + self.notes_gen.trainable_variables
 
-
-
-
+            if self.mode_ in ['time', 'both']:
                 #  x_in_tm: (batch, in_seq_len, 3)
-            #  x_tar_in_tm: (batch, out_seq_len, 3)
-            #  x_tar_out_tm: (batch, out_seq_len, 3)
-            x_in_tm, x_tar_in_tm, x_tar_out_tm = x_in[:, :, 1:], x_tar_in[:, :, 1:], x_tar_out[:, :, 1:]
+                #  x_tar_in_tm: (batch, out_seq_len, 3)
+                #  x_tar_out_tm: (batch, out_seq_len, 3)
+                x_in_tm, x_tar_in_tm, x_tar_out_tm = x_in[:, :, 1:], x_tar_in[:, :, 1:], x_tar_out[:, :, 1:]
+                # x_out_nt_pr: (batch, out_seq_len, 3)
+                x_out_tm_pr, _ = self.time_gen(
+                    x_en=x_in_tm, x_de=x_tar_in_tm, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+                # the ending value is 0, remove from loss calcultion
+                loss_time = util.loss_func_time(x_tar_out_tm[:, :-1, :], x_out_tm_pr[:, :-1, :])
+                variables_time = self.time_gen.trainable_variables
 
+            if self.mode_ == 'notes':
+                gradients = tape.gradient(loss_notes, variables_notes)
+                self.optimizer.apply_gradients(zip(gradients, variables_notes))
+                self.train_loss(loss_notes)
+                return loss_notes
+            elif self.mode_ == 'time':
+                gradients = tape.gradient(loss_time, variables_time)
+                self.optimizer.apply_gradients(zip(gradients, variables_time))
+                self.train_loss(loss_time)
+                return loss_time
+            else:  # self.mode_ == 'both'
+                variables_combine = variables_notes + variables_time
+                loss_combine = (loss_notes * nt_tm_loss_weight[0] +
+                                loss_time * nt_tm_loss_weight[1]) / sum(nt_tm_loss_weight)
+                gradients = tape.gradient(loss_combine, variables_combine)
+                self.optimizer.apply_gradients(zip(gradients, variables_combine))
+                self.train_loss(loss_combine)
+                return loss_notes, loss_time, loss_combine
 
+    def train(self, epochs, dataset, nt_tm_loss_weight=(1, 1), save_model_step=10,
+              notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
+              max_to_keep=5, print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
+              lr_tm=0.01, warmup_steps=4000,
+              optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)):
 
+        if self.mode_ == 'notes':
+            learning_rate = util.CustomSchedule(self.embed_dim, warmup_steps)
+        else:
+            learning_rate = lr_tm
+        optimizer = optmzr(learning_rate)
+        train_loss = tf.keras.metrics.Mean(name='train_loss')
 
+        # ---------------------- call back setting --------------------------
+        if self.mode_ in ['notes', 'both']:
+            cp_notes_emb = tf.train.Checkpoint(model=self.embedder_en, optimizer=optimizer)
+            cp_manager_notes_emb = tf.train.CheckpointManager(cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
+            if cp_manager_notes_emb.latest_checkpoint:
+                cp_notes_emb.restore(cp_manager_notes_emb.latest_checkpoint)
+                print('Restored the latest notes_emb')
 
+            cp_notes_gen = tf.train.Checkpoint(model=self.notes_gen, optimizer=optimizer)
+            cp_manager_notes_gen = tf.train.CheckpointManager(cp_notes_gen, notes_gen_path, max_to_keep=max_to_keep)
+            if cp_manager_notes_gen.latest_checkpoint:
+                cp_notes_gen.restore(cp_manager_notes_gen.latest_checkpoint)
+                print('Restored the latest notes_gen')
 
+        if self.mode_ in ['time', 'both']:
+            cp_time_gen = tf.train.Checkpoint(model=self.time_gen, optimizer=optimizer)
+            cp_manager_time_gen = tf.train.CheckpointManager(cp_time_gen, time_gen_path, max_to_keep=max_to_keep)
+            if cp_manager_time_gen.latest_checkpoint:
+                cp_time_gen.restore(cp_manager_time_gen.latest_checkpoint)
+                print('Restored the latest time_gen')
 
-            x_en_melody = self.notes_emb(x_in)  # (batch, in_seq_len, embed_dim)
-            x_en_duration = x_in[:, :, 1][:, :, tf.newaxis]  # get the duration (batch, in_seq_len)
-            mask_padding = None  # util.padding_mask(x_in[:, :, 0])  # (batch, 1, 1, seq_len)
-            mask_lookahead = util.lookahead_mask(x_tar_in.shape[1])  # (seq_len, seq_len)
-
-            # ------------------ predict ------------------------
-            # x_out_melody: (batch, out_seq_len, out_notes_pool_size)
-            # x_out_duration: (batch, out_seq_len, 1)
-            x_out_melody, all_weights_melody, x_out_duration, all_weights_duration = self.generator(
-                x_en_melody, x_en_duration, x_tar_in, mask_padding, mask_lookahead)
-
-            # ------------------ calculate loss ------------------------
-            loss_notes = util.loss_func_notes(x_tar_out[:, :, 0], x_out_melody)
-            loss_duration = util.loss_func_duration(x_tar_out[:, :, 1], x_out_duration[:, :, 0])
-            loss_combine = (loss_notes * notes_dur_loss_weight[0] +
-                            loss_duration * notes_dur_loss_weight[1]) / sum(notes_dur_loss_weight)
-
-        variables = self.embedder_en.trainable_variables + self.generator.trainable_variables
-        gradients = tape.gradient(loss_combine, variables)
-        self.optimizer.apply_gradients(zip(gradients, variables))
-        self.train_loss(loss_combine)
-
-        return loss_notes, loss_duration, loss_combine
-
-
+        # ---------------------- training --------------------------
+        for epoch in range(epochs):
+            train_loss.reset_states()
+            start = time.time()
+            for i, (x_in, x_tar_in, x_tar_out) in enumerate(dataset):
+                losses = self.train_step(x_in, x_tar_in, x_tar_out, nt_tm_loss_weight)
+                if print_batch:
+                    if (i + 1) % print_batch_step == 0:
+                        if self.mode_ in ['notes', 'time']:
+                            print('Epoch {} Batch {}: loss={:.4f}'.format(epoch+1, i+1, losses.numpy()))
+                        else:  # self.mode_ == 'both'
+                            print('Epoch {} Batch {}: loss_notes={:.4f}; loss_time={:.4f}; loss_combine={:.4f}'.format(
+                                epoch + 1, i + 1, losses[0].numpy(), losses[1].numpy(), losses[2].numpy()))
+            if print_epoch:
+                if (epoch + 1) % print_epoch_step == 0:
+                    print('Epoch {}: Loss = {:.4f}, Time used = {:.4f}'.format(
+                        epoch + 1, train_loss.result(), time.time() - start))
+            if (epoch + 1) % save_model_step == 0:
+                if self.mode_ in ['notes', 'both']:
+                    cp_manager_notes_emb.save()
+                    print('Saved the latest notes_emb')
+                    cp_manager_notes_gen.save()
+                    print('Saved the latest notes_gen')
+                if self.mode_ in ['time', 'both']:
+                    cp_manager_time_gen.save()
+                    print('Saved the latest time_gen')
 
 
 """
@@ -328,96 +391,6 @@ x_de.shape
 x_en = x_in[:, :, 1:]
 x_en.shape
 """
-
-#
-# class GeneratorPretrain(tf.keras.Model):
-#
-#     def __init__(self, en_max_pos=5000, de_max_pos=10000, embed_dim=256, n_heads=4, in_notes_pool_size=150000,
-#                  out_notes_pool_size=150000, fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3,
-#                  norm_epsilon=1e-6, transformer_dropout_rate=0.2, embedding_dropout_rate=0.2, beta_1=0.9, beta_2=0.98,
-#                  epsilon=1e-9):
-#         super(GeneratorPretrain, self).__init__()
-#         self.embedder_en = Embedder(
-#             notes_pool_size=in_notes_pool_size, max_pos=en_max_pos, embed_dim=embed_dim,
-#             dropout_rate=embedding_dropout_rate)
-#         self.generator = Generator(
-#             de_max_pos=de_max_pos, embed_dim=embed_dim, n_heads=n_heads, out_notes_pool_size=out_notes_pool_size,
-#             fc_activation=fc_activation, encoder_layers=encoder_layers, decoder_layers=decoder_layers,
-#             fc_layers=fc_layers, norm_epsilon=norm_epsilon, transformer_dropout_rate=transformer_dropout_rate,
-#             embedding_dropout_rate=embedding_dropout_rate)
-#
-#         self.train_loss = tf.keras.metrics.Mean(name='train_loss')
-#         self.learning_rate = util.CustomSchedule(embed_dim)
-#         self.optimizer = tf.keras.optimizers.Adam(self.learning_rate, beta_1=beta_1, beta_2=beta_2, epsilon=epsilon)
-#
-#     def train_step(self, x_in, x_tar_in, x_tar_out, notes_dur_loss_weight=(1, 1)):
-#         # x_in: numpy 3d array (batch, in_seq_len, 2): column 1: notes id (converted to int), column 2: normalised duration
-#         # x_tar_in: numpy 3d array (batch, out_seq_len, 2)
-#         # x_tar_out: numpy 3d array (batch, x_tar_out, 2)
-#         with tf.GradientTape() as tape:
-#             x_en_melody = self.embedder_en(x_in)  # (batch, in_seq_len, embed_dim)
-#             x_en_duration = x_in[:, :, 1][:, :, tf.newaxis]  # get the duration (batch, in_seq_len)
-#             mask_padding = util.padding_mask(x_in[:, :, 0])  # (batch, 1, 1, seq_len)
-#             mask_lookahead = util.lookahead_mask(x_tar_in.shape[1])  # (seq_len, seq_len)
-#
-#             # ------------------ predict ------------------------
-#             # x_out_melody: (batch, out_seq_len, out_notes_pool_size)
-#             # x_out_duration: (batch, out_seq_len, 1)
-#             x_out_melody, all_weights_melody, x_out_duration, all_weights_duration = self.generator(
-#                 x_en_melody, x_en_duration, x_tar_in, mask_padding, mask_lookahead)
-#
-#             # ------------------ calculate loss ------------------------
-#             loss_notes = util.loss_func_notes(x_tar_out[:, :, 0], x_out_melody)
-#             loss_duration = util.loss_func_duration(x_tar_out[:, :, 1], x_out_duration[:, :, 0])
-#             loss_combine = (loss_notes * notes_dur_loss_weight[0] +
-#                             loss_duration * notes_dur_loss_weight[1]) / sum(notes_dur_loss_weight)
-#
-#         variables = self.embedder_en.trainable_variables + self.generator.trainable_variables
-#         gradients = tape.gradient(loss_combine, variables)
-#         self.optimizer.apply_gradients(zip(gradients, variables))
-#         self.train_loss(loss_combine)
-#
-#         return loss_notes, loss_duration, loss_combine
-#
-#     def train(self, epochs, dataset, notes_dur_loss_weight=(1, 1), save_model_step=10,
-#               cp_embedder_path=cp_embedder_path, cp_generator_path=cp_generator_path, max_cp_to_keep=5,
-#               print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5):
-#
-#         # ---------------------- call back setting --------------------------
-#         cp_embedder = tf.train.Checkpoint(model=self.embedder_en, optimizer=self.optimizer)
-#         cp_manager_embedder = tf.train.CheckpointManager(cp_embedder, cp_embedder_path, max_to_keep=max_cp_to_keep)
-#         if cp_manager_embedder.latest_checkpoint:
-#             cp_embedder.restore(cp_manager_embedder.latest_checkpoint)
-#             print('Restored the latest embedder')
-#
-#         cp_generator = tf.train.Checkpoint(model=self.generator, optimizer=self.optimizer)
-#         cp_manager_generator = tf.train.CheckpointManager(cp_generator, cp_generator_path, max_to_keep=max_cp_to_keep)
-#         if cp_manager_generator.latest_checkpoint:
-#             cp_generator.restore(cp_manager_generator.latest_checkpoint)
-#             print('Restored the latest generator')
-#
-#         # ---------------------- training --------------------------
-#         for epoch in range(epochs):
-#             self.train_loss.reset_states()
-#             start = time.time()
-#             for i, (x_in, x_tar_in, x_tar_out) in enumerate(dataset):
-#                 loss_notes, loss_duration, loss_combine = self.train_step(
-#                     x_in, x_tar_in, x_tar_out, notes_dur_loss_weight)
-#                 if print_batch:
-#                     if (i + 1) % print_batch_step == 0:
-#                         print('Epoch {} Batch {}: loss_notes={:.4f}, loss_duration={:.4f}, loss_combine={:.4f}'.format(
-#                             epoch+1, i+1, loss_notes.numpy(), loss_duration.numpy(), loss_combine.numpy()))
-#             if print_epoch:
-#                 if (epoch + 1) % print_epoch_step == 0:
-#                     print('Epoch {}: Loss = {:.4f}, Time used = {:.4f}'.format(
-#                         epoch + 1, self.train_loss.result(), time.time() - start))
-#             if (epoch + 1) % save_model_step == 0:
-#                 cp_manager_embedder.save()
-#                 print('Saved the latest embedder')
-#                 cp_manager_generator.save()
-#                 print('Saved the latest generator')
-#
-
 
 
 """
