@@ -39,7 +39,7 @@ def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
     # x: (batch, length, 4); 4 columns: [notes in text format, velocity, time since last start, notes duration]
     # ------------- encode notes from text to integer --------------
     x_0 = tk.texts_to_sequences(x[:, :, 0].tolist())
-    return np.append(np.expand_dims(x_0, axis=-1),
+    return np.append(np.expand_dims(x_0, axis=-1) - 1,  # ..- 1 because tk index starts from 1
                      np.divide(x[:, :, 1:], np.array([vel_norm, tmps_norm, dur_norm])), axis=-1).astype(np.float32)
 
 
@@ -50,7 +50,6 @@ def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm
     x_in, x_tar = preprocess.DataPreparation.batch_preprocessing(
         in_seq_len, out_seq_len-1, step, pths, name_substr_list)
     batch = x_in.shape[0]
-
     # append '<start>' in front and '<end>' at the end
     x_tar = np.concatenate(
         [np.expand_dims(np.array([['<start>', 0, 0, 0]] * batch, dtype=object), axis=1),
@@ -66,19 +65,17 @@ def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm
 
 """
 import pickle as pkl
-tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_final.pkl'
 tk = pkl.load(open(tk_path, 'rb'))
 
 in_seq_len, out_seq_len = 16, 64
 dataset = load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, 
-dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
+    dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
 
 x_in, x_tar_in, x_tar_out = list(dataset.prefetch(1).as_numpy_iterator())[0]
+print(x_in.shape, x_tar_in.shape, x_tar_out.shape)
 
 """
-
-
-
 
 
 def inds2notes(tk, nid, default='p'):
