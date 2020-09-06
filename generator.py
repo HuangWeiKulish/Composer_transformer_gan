@@ -7,9 +7,9 @@ import transformer
 tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
-notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/notes_embedder'
-notes_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/notes_generator'
-time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/transformer_gan/model/time_generator'
+notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_embedder'
+notes_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_generator'
+time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_generator'
 
 
 class NotesEmbedder(tf.keras.Model):
@@ -107,6 +107,7 @@ class PretrainGenerator(tf.keras.Model):
             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
             norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation) \
             if mode_ == 'notes' else None
+
         # 3 for [velocity, velocity, time since last start, notes duration]
         self.time_gen = transformer.Transformer(
             embed_dim=time_features, n_heads=1, out_notes_pool_size=time_features,
@@ -245,7 +246,7 @@ class PretrainGenerator(tf.keras.Model):
                 self.train_loss(loss_combine)
                 return loss_notes, loss_time, loss_combine
 
-    def train(self, dataset, epochs=10, nt_tm_loss_weight=(1, 1), save_model_step=10,
+    def train(self, dataset, epochs=10, nt_tm_loss_weight=(1, 1), save_model_step=1,
               notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
               max_to_keep=5, print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5):
 
@@ -296,4 +297,9 @@ class PretrainGenerator(tf.keras.Model):
                 if self.mode_ in ['time', 'both']:
                     cp_manager_time_gen.save()
                     print('Saved the latest time_gen')
+
+
+
+
+
 

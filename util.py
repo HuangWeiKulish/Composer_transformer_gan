@@ -22,11 +22,11 @@ def lookahead_mask(seq_len):
     return 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
 
 
-def checkpoint(model, save_path, optimizer, save_every=20):
-    cp = tf.train.Checkpoint(transformer=model, optimizer=optimizer)
-    cp_manager = tf.train.CheckpointManager(cp, save_path, max_to_keep=save_every)
-    if cp_manager.latest_checkpoint:
-        cp.restore(cp_manager.latest_checkpoint)  # restore the latest checkpoint if exists
+# def checkpoint(model, save_path, optimizer, save_every=20):
+#     cp = tf.train.Checkpoint(transformer=model, optimizer=optimizer)
+#     cp_manager = tf.train.CheckpointManager(cp, save_path, max_to_keep=save_every)
+#     if cp_manager.latest_checkpoint:
+#         cp.restore(cp_manager.latest_checkpoint)  # restore the latest checkpoint if exists
 
 
 def softargmax(x, beta=1e10):
