@@ -1,50 +1,35 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Dense
 import util, transformer, generator
+
+notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_embedder'
+notes_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_generator'
+time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_generator'
 
 
 class Discriminator(tf.keras.Model):
 
-    def __init__(self, notes_pool_size, max_pos, embed_dim, dropout_rate=0.2, n_heads=4, fc_layers=3,
-                 norm_epsilon=1e-6, fc_activation="relu", encoder_layers=3, decoder_layers=3, ):
+    def __init__(self, embed_dim=256, n_heads=4, kernel_size=3, fc_activation="relu", encoder_layers=2,
+                 decoder_layers=2, fc_layers=3, norm_epsilon=1e-6, transformer_dropout_rate=0.2):
         super(Discriminator, self).__init__()
-        self.embedder = generator.Embedder(notes_pool_size, max_pos, embed_dim, dropout_rate)
-        self.notes_pool_size = notes_pool_size
-        self.n_heads = n_heads
-        self.depth = embed_dim // n_heads
-        self.fc_layers = fc_layers
-        self.norm_epsilon = norm_epsilon
-        self.fc_activation = fc_activation
-        self.encoder_layers = encoder_layers
-        self.decoder_layers = decoder_layers
+        assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
 
-    def call(self, x_out_melody, x_out_duration, x_de_in, mask_padding, mask_lookahead):
-        # x_out_melody: (batch, out_seq_len, out_notes_pool_size)
-        # x_out_duration: (batch, out_seq_len, 1)
-        # x_de_in: (batch, 2): 2 columns: [tk.word_index['<start>'], 0]
-        melody_ = util.softargmax(x_out_melody, beta=1e10)  # return the index of the max value: (batch, seq_len)
-        melody_ = tf.expand_dims(melody_, axis=-1)  # (batch, seq_len, 1)
-        music_ = tf.concat([melody_, x_out_duration], axis=-1)  # (batch, seq_len, 2): column: notes_id, duration
-        emb = self.embedder(music_)  # (batch, seq_len, embed_dim)
+        self.tm_in_expand = tf.keras.layers.Conv1D(
+            filters=embed_dim, kernel_size=kernel_size, strides=1, padding='same')
+        self.discr = transformer.Transformer(
+            embed_dim=embed_dim, n_heads=n_heads, out_notes_pool_size=1,
+            encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
+            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation)
+        self.fc = tf.keras.layers.Dense(1, activation='sigmoid')
 
-        x_de_in = tf.expand_dims(x_de_in, 1)  # (batch, 1, 2)
-        x_de = self.embedder(x_de_in)  # (batch, 1, embed_dim)
-
-        # (batch, out_seq_len, 1)
-        out, _ = transformer.TransformerBlocks.transformer(
-            emb, x_de, mask_padding, mask_lookahead, out_notes_pool_size=self.notes_pool_size, embed_dim=self.embed_dim,
-            encoder_layers=self.encoder_layers, decoder_layers=self.decoder_layers, n_heads=self.n_heads,
-            depth=self.depth, fc_layers=self.fc_layers, norm_epsilon=self.norm_epsilon,
-            transformer_dropout_rate=self.transformer_dropout_rate,
-            fc_activation=self.fc_activation, type='')  # (None, None, 1)
-
-        """
-        out, _ = TransformerBlocks.transformer(
-            emb, x_de, mask_padding, mask_lookahead, out_notes_pool_size=notes_pool_size, embed_dim=embed_dim,
-            encoder_layers=encoder_layers, decoder_layers=decoder_layers, n_heads=n_heads, depth=depth,
-            fc_layers=fc_layers, norm_epsilon=norm_epsilon,
-            transformer_dropout_rate=transformer_dropout_rate,
-            fc_activation=fc_activation, type='')
-        """
-        out = Dense(1, activation='sigmoid')(out)  # (None, None, 1)
+    def call(self, nt_in, tm_in, de_in, mask_padding, mask_lookahead):
+        # nt_in: (batch, seq_len, embed_dim)
+        # tm_in: (batch, seq_len, 3): 3 for [velocity, velocity, time since last start, notes duration]
+        # de_in: (batch, 1, embed_dim): the '<start>' embedding
+        # mask_padding = None  # util.padding_mask(x_in[:, :, 0])  # (batch, 1, 1, in_seq_len)
+        # mask_lookahead = util.lookahead_mask(nt_in.shape[1])  # (out_seq_len, out_seq_len)
+        tm_in_ = self.tm_in_expand(tm_in)  # (batch, seq_len, embed_dim)
+        combined = tf.math.add(nt_in, tm_in_)  # (batch, seq_len, embed_dim)
+        out, _ = self.discr(combined, de_in, mask_padding, mask_lookahead)  # out: (batch, 1, 1)
+        out = self.fc(out)  # (batch, 1, 1)
+        out = tf.keras.layers.Flatten()(out)  # (batch, 1)
         return out

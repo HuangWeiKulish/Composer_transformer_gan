@@ -90,6 +90,9 @@ class PretrainGenerator(tf.keras.Model):
                  lr_tm=0.01, warmup_steps=4000,
                  optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)):
         super(PretrainGenerator, self).__init__()
+        if mode_ == 'notes':
+            assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
+
         self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
         self.embed_dim = embed_dim
         if self.mode_ == 'notes':
@@ -148,7 +151,7 @@ class PretrainGenerator(tf.keras.Model):
     def predict_notes(self, x_en, tk, out_seq_len, return_str=True):
         # emb_model is the embedding model
         # x_en: (batch_size, in_seq_len, embed_dim)
-        # x_de: batch_size, 1, embed_dim)
+        # x_de: (batch_size, 1, embed_dim)
         batch_size = x_en.shape[0]
         x_de = tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
         x_de = self.notes_emb(x_de)

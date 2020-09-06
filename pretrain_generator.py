@@ -19,9 +19,9 @@ print(notes_pool_size)
 
 
 # pre-train notes generator -------------------------------------------------------------------------------------
-in_seq_len, out_seq_len = 16, 16  # 64
+in_seq_len, out_seq_len = 16, 128  # 64
 
-dataset = util.load_true_data(tk, in_seq_len, out_seq_len, step=8, batch_size=50, vel_norm=64.0, tmps_norm=0.12,
+dataset = util.load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12,
     dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
 
 notes_gen = generator.PretrainGenerator(
@@ -31,7 +31,7 @@ notes_gen = generator.PretrainGenerator(
 
 notes_gen.train(dataset, epochs=2, nt_tm_loss_weight=(1, 1), save_model_step=1,
                 notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
-                max_to_keep=5, print_batch=True, print_batch_step=50, print_epoch=True, print_epoch_step=1)
+                max_to_keep=5, print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=1)
 
 # pre-train time generator -------------------------------------------------------------------------------------
 in_seq_len, out_seq_len = 16, 256  # 64
