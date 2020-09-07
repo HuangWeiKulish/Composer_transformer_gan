@@ -1,4 +1,5 @@
 import numpy as np
+import itertools
 import os
 import tensorflow as tf
 from tensorflow.keras.models import load_model
@@ -22,13 +23,6 @@ def lookahead_mask(seq_len):
     return 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
 
 
-# def checkpoint(model, save_path, optimizer, save_every=20):
-#     cp = tf.train.Checkpoint(transformer=model, optimizer=optimizer)
-#     cp_manager = tf.train.CheckpointManager(cp, save_path, max_to_keep=save_every)
-#     if cp_manager.latest_checkpoint:
-#         cp.restore(cp_manager.latest_checkpoint)  # restore the latest checkpoint if exists
-
-
 def softargmax(x, beta=1e10):
     x = tf.convert_to_tensor(x)
     x_range = tf.range(x.shape.as_list()[-1], dtype=x.dtype)
@@ -43,11 +37,12 @@ def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
                      np.divide(x[:, :, 1:], np.array([vel_norm, tmps_norm, dur_norm])), axis=-1).astype(np.float32)
 
 
-def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
-                   pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
+def load_true_data_pretrain_gen(
+        tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+        pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
     # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
     # tk = pkl.load(open(tk_path, 'rb'))
-    x_in, x_tar = preprocess.DataPreparation.batch_preprocessing(
+    x_in, x_tar = preprocess.DataPreparation.batch_preprocessing_pretrain_gen(
         in_seq_len, out_seq_len-1, step, pths, name_substr_list)
     batch = x_in.shape[0]
     # append '<start>' in front and '<end>' at the end
@@ -59,6 +54,19 @@ def load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm
     x_in_ = number_encode_text(x_in, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
     x_tar_ = number_encode_text(x_tar, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
     dataset = tf.data.Dataset.from_tensor_slices((x_in_, x_tar_[:, :-1, :], x_tar_[:, 1:, :])).cache()
+    dataset = dataset.shuffle(x_in.shape[0]+1).batch(batch_size)
+    return dataset
+
+
+def load_true_data_gan(
+        tk, seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+        pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
+    # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
+    # tk = pkl.load(open(tk_path, 'rb'))
+    x_in = preprocess.DataPreparation.batch_preprocessing_gan(
+        seq_len, step=step, pths=pths, name_substr_list=name_substr_list)  # (batch, seq_len, 4)
+    x_in = number_encode_text(x_in, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
+    dataset = tf.data.Dataset.from_tensor_slices(x_in).cache()
     dataset = dataset.shuffle(x_in.shape[0]+1).batch(batch_size)
     return dataset
 
@@ -76,13 +84,6 @@ x_in, x_tar_in, x_tar_out = list(dataset.prefetch(1).as_numpy_iterator())[0]
 print(x_in.shape, x_tar_in.shape, x_tar_out.shape)
 
 """
-
-
-def inds2notes(tk, nid, default='p'):
-    try:
-        return tk.index_word[nid]
-    except:
-        return default
 
 
 class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):

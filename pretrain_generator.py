@@ -21,8 +21,9 @@ print(notes_pool_size)
 # pre-train notes generator -------------------------------------------------------------------------------------
 in_seq_len, out_seq_len = 16, 128  # 64
 
-dataset = util.load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12,
-                              dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
+dataset = util.load_true_data_pretrain_gen(
+    tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+    pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
 
 notes_gen = generator.Generator(
     out_notes_pool_size=15002, embed_dim=256, n_heads=4, max_pos=800, time_features=3,
@@ -38,8 +39,9 @@ notes_gen.train(dataset, epochs=2, nt_tm_loss_weight=(1, 1), save_model_step=1,
 # pre-train time generator -------------------------------------------------------------------------------------
 in_seq_len, out_seq_len = 16, 256  # 64
 
-dataset = util.load_true_data(tk, in_seq_len, out_seq_len, step=30, batch_size=50, vel_norm=64.0, tmps_norm=0.12,
-                              dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
+dataset = util.load_true_data_pretrain_gen(
+    tk, in_seq_len, out_seq_len, step=30, batch_size=50, vel_norm=64.0, tmps_norm=0.12,
+    dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
 
 time_gen = generator.Generator(
     out_notes_pool_size=15002, embed_dim=256, n_heads=4, max_pos=800, time_features=3,

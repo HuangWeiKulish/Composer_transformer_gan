@@ -9,6 +9,7 @@ import util
 import transformer
 import discriminator
 import generator
+import time
 
 notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_embedder'
 notes_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_generator'
@@ -33,6 +34,7 @@ class GAN(tf.keras.Model):
                  d_transformer_dropout_rate=0.2,
 
                  notes_latent_nlayers=4, notes_latent_dim_base=4, time_latent_nlayers=4,
+                 out_seq_len=64,
 
                  mode_='both', custm_lr=True,
 
@@ -42,6 +44,10 @@ class GAN(tf.keras.Model):
         assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
 
         # ---------------------------------- settings ----------------------------------
+        self.batch_size = None
+        self.true_data = None
+        self.in_seq_len = 16
+        self.out_seq_len = out_seq_len
         self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
         self.embed_dim = embed_dim
         if custm_lr:
@@ -71,20 +77,28 @@ class GAN(tf.keras.Model):
             encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
             norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate, mode_='both')
 
+    def load_true_samples(self, tk, step=30, batch_size=10, vel_norm=64.0, tmps_norm=0.12,
+                          dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
+        self.batch_size = batch_size
+        self.true_data = util.load_true_data_gan(
+            tk, self.out_seq_len, step=step, batch_size=10, vel_norm=vel_norm,
+            tmps_norm=tmps_norm, dur_norm=dur_norm, pths=pths, name_substr_list=name_substr_list)
+
     def call(self, inputs, training=None, mask=None):
         # generate music from latent
+
         #tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
         pass
 
-    def train_step(self, nt_ltnt, tm_ltnt, out_seq_len, freeze_disc=True):
-        # nt_ltnt: notes random vector (batch, in_seq_len, 16)
-        # tm_ltnt: time random vector (batch, in_seq_len, 1)
+    def train_step(self, nt_ltnt, tm_ltnt, nt_true, tm_true, freeze_disc=True):
+        # nt_ltnt: notes random vector (batch, out_seq_len, 16)
+        # tm_ltnt: time random vector (batch, out_seq_len, 1)
 
         with tf.GradientTape() as tape:
 
             # todo: freeze discriminator ?
 
-
+            # prepare fake samples ==================================================================
             # ---------------------- create latent vectors from random inputs ----------------------
             # (batch, in_seq_len, embed_dim)
             nt_ltnt_ = self.notes_latent(nt_ltnt) if self.mode_ in ['notes', 'both'] else None
@@ -94,19 +108,19 @@ class GAN(tf.keras.Model):
             # ---------------------- generate music from latent vectors ----------------------
             if self.mode_ == 'notes':
                 # get nts: (batch, out_seq_len)
-                nts = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=out_seq_len, return_str=False,
-                               vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
+                nts = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=self.out_seq_len,
+                               return_str=False, vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
                 nts = tf.convert_to_tensor(nts, dtype=tf.float32)  # convert from numpy to tensor
             elif self.mode_ == 'time':
                 # get tms: (batch, out_seq_len, 3)
-                tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=out_seq_len, return_str=False,
-                               vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
+                tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=self.out_seq_len,
+                               return_str=False, vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
                 tms = tf.convert_to_tensor(tms, dtype=tf.float32)  # convert from numpy to tensor
             else:  # self.mode_ == 'both'
-                # get nts: (batch, out_seq_len)
-                # get tms: (batch, out_seq_len, 3)
-                nts, tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=out_seq_len, return_str=False,
-                                    vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
+                # get nts: (batch, out_seq_len) index representation
+                # get tms: (batch, out_seq_len, 3) NOT denormalized
+                nts, tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=self.out_seq_len,
+                                    return_str=False, vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
                 nts = tf.convert_to_tensor(nts, dtype=tf.float32)  # convert from numpy to tensor
                 tms = tf.convert_to_tensor(tms, dtype=tf.float32)  # convert from numpy to tensor
 
@@ -115,8 +129,29 @@ class GAN(tf.keras.Model):
             if self.mode_ in ['notes', 'both']:
                 nts = self.gen.notes_emb(nts)
 
-            # ---------------------- prepare samples ----------------------
-            #fake_samples =
+            # prepare samples ==================================================================
+
+
+
+            # nt_ltnt: notes random vector (batch, out_seq_len, 16)
+            # tm_ltnt: time random vector (batch, out_seq_len, 1)
+
+
+
+
+
+
+
+            # predict true or fake ==================================================================
+            # get decode initial input: (batch, 1, embed_dim)
+            if self.mode_ in ['notes', 'both']:
+                de_in = self.gen.notes_emb(tf.constant([[self.strt_token_id]] * self.batch_size, dtype=tf.float32))
+            else:  # self.mode_ == 'time'
+                de_in = self.gen.notes_emb(tf.constant([[0]] * self.batch_size, dtype=tf.float32))
+
+            # Fake_samples
+
+
 
 
 
@@ -125,20 +160,11 @@ class GAN(tf.keras.Model):
 
             # ---------------------- discriminator ----------------------
 
+
             #
             # strt_token_id
             #
             # self.disc(nts, tms, de_in)
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -147,36 +173,50 @@ class GAN(tf.keras.Model):
 
 
 
-    def train(self,
+    def train(self, epochs=10, nt_tm_loss_weight=(1, 1), save_model_step=1,
+              notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
+              max_to_keep=5, print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
+              lr_tm=0.01, warmup_steps=4000, custm_lr=True,
+              optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
               freeze_ntgen=False, freeze_tmgen=False, freeze_ntemb=False, freeze_ntlatent=False, freeze_tmlatent=False):
 
         # Todo: call self.load_model
 
         # # ---------------------- call back setting --------------------------
-        # if self.mode_ in ['notes', 'both']:
-        #     cp_notes_emb = tf.train.Checkpoint(model=self.notes_emb, optimizer=self.optimizer)
-        #     cp_manager_notes_emb = tf.train.CheckpointManager(cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
-        #     if cp_manager_notes_emb.latest_checkpoint:
-        #         cp_notes_emb.restore(cp_manager_notes_emb.latest_checkpoint)
-        #         print('Restored the latest notes_emb')
-        #
-        #     cp_notes_gen = tf.train.Checkpoint(model=self.notes_gen, optimizer=self.optimizer)
-        #     cp_manager_notes_gen = tf.train.CheckpointManager(cp_notes_gen, notes_gen_path, max_to_keep=max_to_keep)
-        #     if cp_manager_notes_gen.latest_checkpoint:
-        #         cp_notes_gen.restore(cp_manager_notes_gen.latest_checkpoint)
-        #         print('Restored the latest notes_gen')
-        #
-        # if self.mode_ in ['time', 'both']:
-        #     cp_time_gen = tf.train.Checkpoint(model=self.time_gen, optimizer=self.optimizer)
-        #     cp_manager_time_gen = tf.train.CheckpointManager(cp_time_gen, time_gen_path, max_to_keep=max_to_keep)
-        #     if cp_manager_time_gen.latest_checkpoint:
-        #         cp_time_gen.restore(cp_manager_time_gen.latest_checkpoint)
-        #         print('Restored the latest time_gen')
-
-
-
         # also set for discriminator, notes_discriminator, time_discriminator
-        pass
+
+
+
+
+        # ---------------------- training --------------------------
+        for epoch in range(epochs):
+            self.train_loss.reset_states()
+            start = time.time()
+            for true_samples in self.true_data:
+                if true_samples.shape[0] < self.batch_size:
+                    #  the last batch generated may be smaller, so go to next round
+                    # the unselected samples may be selected next time because data will be shuffled
+                    continue
+                # true samples ---------------------------
+                # nt_true: (batch, in_seq_len)
+                # tm_true: (batch, in_seq_len, 3)
+                nt_true, tm_true = true_samples[:, :, 0], true_samples[:, :, 1:]
+                # random vectors ---------------------------
+                # nt_ltnt: (batch, out_seq_len, 16)
+                # tm_ltnt: (batch, out_seq_len, 1)
+                nt_ltnt = util.latant_vector(self.batch_size, self.in_seq_len, 16, mean_=0.0, std_=1.1)
+                tm_ltnt = util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0.0, std_=1.1)
+
+
+
+
+                losses = self.train_step(nt_ltnt, tm_ltnt, nt_true, tm_true, freeze_disc=True)
+
+
+
+
+
+
 
 
 """

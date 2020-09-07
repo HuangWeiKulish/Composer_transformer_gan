@@ -183,6 +183,33 @@ class Generator(tf.keras.Model):
             result = result * np.array([vel_norm, tmps_norm, dur_norm])
         return result
 
+    def load_model(self, notes_emb_path, notes_gen_path, time_gen_path,
+                   load_notes_emb=True, load_notes_gen=True, load_time_gen=True, max_to_keep=5):
+        if self.mode_ in ['notes', 'both']:
+            if load_notes_emb:
+                self.cp_notes_emb = tf.train.Checkpoint(model=self.notes_emb, optimizer=self.optimizer)
+                self.cp_manager_notes_emb = tf.train.CheckpointManager(
+                    self.cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
+                if self.cp_manager_notes_emb.latest_checkpoint:
+                    self.cp_notes_emb.restore(self.cp_manager_notes_emb.latest_checkpoint)
+                    print('Restored the latest notes_emb')
+            if load_notes_gen:
+                self.cp_notes_gen = tf.train.Checkpoint(model=self.notes_gen, optimizer=self.optimizer)
+                self.cp_manager_notes_gen = tf.train.CheckpointManager(
+                    self.cp_notes_gen, notes_gen_path, max_to_keep=max_to_keep)
+                if self.cp_manager_notes_gen.latest_checkpoint:
+                    self.cp_notes_gen.restore(self.cp_manager_notes_gen.latest_checkpoint)
+                    print('Restored the latest notes_gen')
+
+        if self.mode_ in ['time', 'both']:
+            if load_time_gen:
+                self.cp_time_gen = tf.train.Checkpoint(model=self.time_gen, optimizer=self.optimizer)
+                self.cp_manager_time_gen = tf.train.CheckpointManager(
+                    self.cp_time_gen, time_gen_path, max_to_keep=max_to_keep)
+                if self.cp_manager_time_gen.latest_checkpoint:
+                    self.cp_time_gen.restore(self.cp_manager_time_gen.latest_checkpoint)
+                    print('Restored the latest time_gen')
+
     def train_step(self, x_in, x_tar_in, x_tar_out, nt_tm_loss_weight=(1, 1)):
         # x_in: numpy 3d array (batch, in_seq_len, 4):
         # x_tar_in: numpy 3d array (batch, out_seq_len, 4)
@@ -238,33 +265,6 @@ class Generator(tf.keras.Model):
                 self.optimizer.apply_gradients(zip(gradients, variables_combine))
                 self.train_loss(loss_combine)
                 return loss_notes, loss_time, loss_combine
-
-    def load_model(self, notes_emb_path, notes_gen_path, time_gen_path,
-                   load_notes_emb=True, load_notes_gen=True, load_time_gen=True, max_to_keep=5):
-        if self.mode_ in ['notes', 'both']:
-            if load_notes_emb:
-                self.cp_notes_emb = tf.train.Checkpoint(model=self.notes_emb, optimizer=self.optimizer)
-                self.cp_manager_notes_emb = tf.train.CheckpointManager(
-                    self.cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
-                if self.cp_manager_notes_emb.latest_checkpoint:
-                    self.cp_notes_emb.restore(self.cp_manager_notes_emb.latest_checkpoint)
-                    print('Restored the latest notes_emb')
-            if load_notes_gen:
-                self.cp_notes_gen = tf.train.Checkpoint(model=self.notes_gen, optimizer=self.optimizer)
-                self.cp_manager_notes_gen = tf.train.CheckpointManager(
-                    self.cp_notes_gen, notes_gen_path, max_to_keep=max_to_keep)
-                if self.cp_manager_notes_gen.latest_checkpoint:
-                    self.cp_notes_gen.restore(self.cp_manager_notes_gen.latest_checkpoint)
-                    print('Restored the latest notes_gen')
-
-        if self.mode_ in ['time', 'both']:
-            if load_time_gen:
-                self.cp_time_gen = tf.train.Checkpoint(model=self.time_gen, optimizer=self.optimizer)
-                self.cp_manager_time_gen = tf.train.CheckpointManager(
-                    self.cp_time_gen, time_gen_path, max_to_keep=max_to_keep)
-                if self.cp_manager_time_gen.latest_checkpoint:
-                    self.cp_time_gen.restore(self.cp_manager_time_gen.latest_checkpoint)
-                    print('Restored the latest time_gen')
 
     def train(self, dataset, epochs=10, nt_tm_loss_weight=(1, 1), save_model_step=1,
               notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,

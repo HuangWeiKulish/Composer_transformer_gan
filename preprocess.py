@@ -750,8 +750,9 @@ class DataPreparation:
         return result
 
     @staticmethod
-    def batch_preprocessing(in_seq_len, out_seq_len, step=60,
-                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
+    def batch_preprocessing_pretrain_gen(
+            in_seq_len, out_seq_len, step=60,
+            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
         all_file_names = DataPreparation.get_all_filenames(pths=pths, name_substr_list=name_substr_list)
         length = in_seq_len + out_seq_len
         x_in, x_tar = [], []
@@ -764,14 +765,15 @@ class DataPreparation:
                 x_tar += ary[:, in_seq_len:, :].tolist()
         return np.array(x_in, dtype=object), np.array(x_tar, dtype=object)
 
-
-"""
-# test function
-in_seq_len = 16
-out_seq_len = 64
-x_in, x_tar = DataPreparation.batch_preprocessing(in_seq_len, out_seq_len, step=60,
-                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
-print(x_in.shape)
-print(x_tar.shape)
-
-"""
+    @staticmethod
+    def batch_preprocessing_gan(seq_len, step=60, pths='/Users/Wei/Desktop/midi_train/arry_modified',
+                                name_substr_list=['']):
+        all_file_names = DataPreparation.get_all_filenames(pths=pths, name_substr_list=name_substr_list)
+        x_in = []
+        for filepath in all_file_names:
+            ary = pkl.load(open(filepath, 'rb'))  # file.shape = (length, 2)
+            if ary.shape[0] >= seq_len:
+                ary = DataPreparation.cut_array(ary, seq_len, step, int(step/3))  # (n_samples, length, 2)
+                ary = np.array(ary, dtype=object)
+                x_in += ary.tolist()
+        return np.array(x_in, dtype=object)
