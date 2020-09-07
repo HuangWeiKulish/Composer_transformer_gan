@@ -88,21 +88,14 @@ class Generator(tf.keras.Model):
 
     def __init__(self, out_notes_pool_size=15002, embed_dim=256, n_heads=4, max_pos=800, time_features=3,
                  fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
-                 embedding_dropout_rate=0.2, transformer_dropout_rate=0.2, mode_='notes',
-                 lr_tm=0.01, warmup_steps=4000, custm_lr=True,
-                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)):
+                 embedding_dropout_rate=0.2, transformer_dropout_rate=0.2, mode_='notes'):
         super(Generator, self).__init__()
         if mode_ == 'notes':
             assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
 
         self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
         self.embed_dim = embed_dim
-        if custm_lr:
-            learning_rate = util.CustomSchedule(self.embed_dim, warmup_steps)
-        else:
-            learning_rate = lr_tm
-        self.optimizer = optmzr(learning_rate)
-        self.train_loss = tf.keras.metrics.Mean(name='train_loss')
+
 
         self.notes_emb = NotesEmbedder(
             notes_pool_size=out_notes_pool_size, max_pos=max_pos, embed_dim=embed_dim,
@@ -273,7 +266,15 @@ class Generator(tf.keras.Model):
 
     def train(self, dataset, epochs=10, nt_tm_loss_weight=(1, 1), save_model_step=1,
               notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
-              max_to_keep=5, print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5):
+              max_to_keep=5, print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
+              lr_tm=0.01, warmup_steps=4000, custm_lr=True,
+              optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)):
+        if custm_lr:
+            learning_rate = util.CustomSchedule(self.embed_dim, warmup_steps)
+        else:
+            learning_rate = lr_tm
+        self.optimizer = optmzr(learning_rate)
+        self.train_loss = tf.keras.metrics.Mean(name='train_loss')
 
         # ---------------------- call back setting --------------------------
         self.load_model(notes_emb_path, notes_gen_path, time_gen_path,
