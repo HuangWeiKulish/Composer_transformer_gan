@@ -35,14 +35,10 @@ class GAN(tf.keras.Model):
                  notes_latent_nlayers=4, notes_latent_dim_base=4, time_latent_nlayers=4,
 
                  mode_='both', custm_lr=True,
-                 freeze_ntgen=False, freeze_tmgen=False, freeze_ntemb=False,
-                 freeze_ntlatent=False, freeze_tmlatent=False,
 
                  lr_tm=0.01, warmup_steps=4000,
                  optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)):
         super(GAN, self).__init__()
-        # mode_ in ['notes', 'time', 'both']
-
         assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
 
         # ---------------------------------- settings ----------------------------------
@@ -58,75 +54,81 @@ class GAN(tf.keras.Model):
         self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
 
         # ---------------------------------- layers ----------------------------------
+        # latent vector generator
         self.notes_latent = generator.NotesLatent(nlayers=notes_latent_nlayers, dim_base=notes_latent_dim_base) \
             if mode_ in ['notes', 'both'] else None
         self.time_latent = generator.TimeLatent(nlayers=time_latent_nlayers) if mode_ in ['time', 'both'] else None
-
-
+        # music generator
         self.gen = generator.Generator(
             out_notes_pool_size=out_notes_pool_size, embed_dim=embed_dim, n_heads=n_heads, max_pos=max_pos,
             time_features=time_features, fc_activation=fc_activation, encoder_layers=g_encoder_layers,
             decoder_layers=g_decoder_layers, fc_layers=g_fc_layers, norm_epsilon=g_norm_epsilon,
             embedding_dropout_rate=g_embedding_dropout_rate, transformer_dropout_rate=g_transformer_dropout_rate,
-            mode_=mode_, lr_tm=lr_tm, warmup_steps=warmup_steps, custm_lr=custm_lr, optmzr=optmzr)
-
-
-
-
-        # self.notes_emb = generator.NotesEmbedder(
-        #     notes_pool_size=out_notes_pool_size, max_pos=max_pos, embed_dim=embed_dim,
-        #     dropout_rate=g_embedding_dropout_rate) if mode_ in ['notes', 'both'] else None
-
-        # self.notes_gen = transformer.Transformer(
-        #     embed_dim=embed_dim, n_heads=n_heads, out_notes_pool_size=out_notes_pool_size,
-        #     encoder_layers=g_encoder_layers, decoder_layers=g_decoder_layers, fc_layers=g_fc_layers,
-        #     norm_epsilon=g_norm_epsilon, dropout_rate=g_transformer_dropout_rate, fc_activation=fc_activation) \
-        #     if mode_ in ['notes', 'both'] else None
-        # self.time_gen = transformer.Transformer(
-        #     embed_dim=time_features, n_heads=1, out_notes_pool_size=time_features,
-        #     encoder_layers=g_encoder_layers, decoder_layers=g_decoder_layers, fc_layers=g_fc_layers,
-        #     norm_epsilon=g_norm_epsilon, dropout_rate=g_transformer_dropout_rate, fc_activation=fc_activation) \
-        #     if mode_ in ['time', 'both'] else None
-
-        self.notes_disc = discriminator.Discriminator(
+            mode_=mode_)
+        # discriminator
+        self.disc = discriminator.Discriminator(
             embed_dim=embed_dim, n_heads=n_heads, kernel_size=d_kernel_size, fc_activation=fc_activation,
             encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
-            norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate) \
-            if mode_ == 'notes' else None
-        self.time_disc = discriminator.Discriminator(
-            embed_dim=embed_dim, n_heads=n_heads, kernel_size=d_kernel_size, fc_activation=fc_activation,
-            encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
-            norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate) \
-            if mode_ == 'time' else None
-        self.combine_disc = discriminator.Discriminator(
-            embed_dim=embed_dim, n_heads=n_heads, kernel_size=d_kernel_size, fc_activation=fc_activation,
-            encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
-            norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate) \
-            if mode_ == 'both' else None
+            norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate, mode_='both')
 
     def call(self, inputs, training=None, mask=None):
         # generate music from latent
-        tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
+        #tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
         pass
 
-    def train_step(self, nt_ltnt, tm_ltnt):
+    def train_step(self, nt_ltnt, tm_ltnt, out_seq_len, freeze_disc=True):
         # nt_ltnt: notes random vector (batch, in_seq_len, 16)
         # tm_ltnt: time random vector (batch, in_seq_len, 1)
 
-        # ---------------------- create latent vectors from random inputs ----------------------
-        # (batch, in_seq_len, embed_dim)
-        nt_ltnt_ = self.notes_latent(nt_ltnt) if self.mode_ in ['notes', 'both'] else None
-        # (batch, in_seq_len, 3)
-        tm_ltnt_ = self.time_latent(tm_ltnt)  if self.mode_ in ['time', 'both'] else None
+        with tf.GradientTape() as tape:
 
-        # ---------------------- generate music from latent vectors ----------------------
-
-        tf.constant([[strt_token_id]] * batch_size, dtype=tf.float32)
+            # todo: freeze discriminator ?
 
 
-        mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
-        mask_lookahead = util.lookahead_mask(nt_ltnt.shape[1])  # (len(x_de_in), len(x_de_in))
-        nts = gen(x_en_nt=nt_ltnt_, x_de_nt=, x_en_tm=tm_ltnt_, x_de_tm=, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+            # ---------------------- create latent vectors from random inputs ----------------------
+            # (batch, in_seq_len, embed_dim)
+            nt_ltnt_ = self.notes_latent(nt_ltnt) if self.mode_ in ['notes', 'both'] else None
+            # (batch, in_seq_len, 3)
+            tm_ltnt_ = self.time_latent(tm_ltnt) if self.mode_ in ['time', 'both'] else None
+
+            # ---------------------- generate music from latent vectors ----------------------
+            if self.mode_ == 'notes':
+                # get nts: (batch, out_seq_len)
+                nts = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=out_seq_len, return_str=False,
+                               vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
+                nts = tf.convert_to_tensor(nts, dtype=tf.float32)  # convert from numpy to tensor
+            elif self.mode_ == 'time':
+                # get tms: (batch, out_seq_len, 3)
+                tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=out_seq_len, return_str=False,
+                               vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
+                tms = tf.convert_to_tensor(tms, dtype=tf.float32)  # convert from numpy to tensor
+            else:  # self.mode_ == 'both'
+                # get nts: (batch, out_seq_len)
+                # get tms: (batch, out_seq_len, 3)
+                nts, tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=out_seq_len, return_str=False,
+                                    vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
+                nts = tf.convert_to_tensor(nts, dtype=tf.float32)  # convert from numpy to tensor
+                tms = tf.convert_to_tensor(tms, dtype=tf.float32)  # convert from numpy to tensor
+
+            # ---------------------- generated notes embedding ----------------------
+            # get nts: (batch, out_seq_len, embed_dim)
+            if self.mode_ in ['notes', 'both']:
+                nts = self.gen.notes_emb(nts)
+
+            # ---------------------- prepare samples ----------------------
+            #fake_samples =
+
+
+
+
+
+
+            # ---------------------- discriminator ----------------------
+
+            #
+            # strt_token_id
+            #
+            # self.disc(nts, tms, de_in)
 
 
 
@@ -134,38 +136,47 @@ class GAN(tf.keras.Model):
 
 
 
-        # x_out_melody: (batch, out_seq_len, out_notes_pool_size)
-        # x_out_duration: (batch, out_seq_len, 1)
-        # x_de_in: (batch, 2): 2 columns: [tk.word_index['<start>'], 0]
-        # melody_ = util.softargmax(nt_in, beta=1e10)  # return the index of the max value: (batch, seq_len)
-        # melody_ = tf.expand_dims(melody_, axis=-1)  # (batch, seq_len, 1)
+
+
+
+
+
+
+    def load_model(self):
         pass
 
-    def train(self):
-        # ---------------------- call back setting --------------------------
-        if self.mode_ in ['notes', 'both']:
-            cp_notes_emb = tf.train.Checkpoint(model=self.notes_emb, optimizer=self.optimizer)
-            cp_manager_notes_emb = tf.train.CheckpointManager(cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
-            if cp_manager_notes_emb.latest_checkpoint:
-                cp_notes_emb.restore(cp_manager_notes_emb.latest_checkpoint)
-                print('Restored the latest notes_emb')
 
-            cp_notes_gen = tf.train.Checkpoint(model=self.notes_gen, optimizer=self.optimizer)
-            cp_manager_notes_gen = tf.train.CheckpointManager(cp_notes_gen, notes_gen_path, max_to_keep=max_to_keep)
-            if cp_manager_notes_gen.latest_checkpoint:
-                cp_notes_gen.restore(cp_manager_notes_gen.latest_checkpoint)
-                print('Restored the latest notes_gen')
 
-        if self.mode_ in ['time', 'both']:
-            cp_time_gen = tf.train.Checkpoint(model=self.time_gen, optimizer=self.optimizer)
-            cp_manager_time_gen = tf.train.CheckpointManager(cp_time_gen, time_gen_path, max_to_keep=max_to_keep)
-            if cp_manager_time_gen.latest_checkpoint:
-                cp_time_gen.restore(cp_manager_time_gen.latest_checkpoint)
-                print('Restored the latest time_gen')
+    def train(self,
+              freeze_ntgen=False, freeze_tmgen=False, freeze_ntemb=False, freeze_ntlatent=False, freeze_tmlatent=False):
+
+        # Todo: call self.load_model
+
+        # # ---------------------- call back setting --------------------------
+        # if self.mode_ in ['notes', 'both']:
+        #     cp_notes_emb = tf.train.Checkpoint(model=self.notes_emb, optimizer=self.optimizer)
+        #     cp_manager_notes_emb = tf.train.CheckpointManager(cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
+        #     if cp_manager_notes_emb.latest_checkpoint:
+        #         cp_notes_emb.restore(cp_manager_notes_emb.latest_checkpoint)
+        #         print('Restored the latest notes_emb')
+        #
+        #     cp_notes_gen = tf.train.Checkpoint(model=self.notes_gen, optimizer=self.optimizer)
+        #     cp_manager_notes_gen = tf.train.CheckpointManager(cp_notes_gen, notes_gen_path, max_to_keep=max_to_keep)
+        #     if cp_manager_notes_gen.latest_checkpoint:
+        #         cp_notes_gen.restore(cp_manager_notes_gen.latest_checkpoint)
+        #         print('Restored the latest notes_gen')
+        #
+        # if self.mode_ in ['time', 'both']:
+        #     cp_time_gen = tf.train.Checkpoint(model=self.time_gen, optimizer=self.optimizer)
+        #     cp_manager_time_gen = tf.train.CheckpointManager(cp_time_gen, time_gen_path, max_to_keep=max_to_keep)
+        #     if cp_manager_time_gen.latest_checkpoint:
+        #         cp_time_gen.restore(cp_manager_time_gen.latest_checkpoint)
+        #         print('Restored the latest time_gen')
 
 
 
         # also set for discriminator, notes_discriminator, time_discriminator
+        pass
 
 
 """

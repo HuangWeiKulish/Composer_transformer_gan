@@ -96,7 +96,6 @@ class Generator(tf.keras.Model):
         self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
         self.embed_dim = embed_dim
 
-
         self.notes_emb = NotesEmbedder(
             notes_pool_size=out_notes_pool_size, max_pos=max_pos, embed_dim=embed_dim,
             dropout_rate=embedding_dropout_rate) if mode_ in ['notes', 'both'] else None
@@ -129,12 +128,15 @@ class Generator(tf.keras.Model):
             # x_en_tm: (batch_size, in_seq_len, 3)
             # x_en_nt: (batch_size, in_seq_len, embed_dim)
             # ------------------------------------------------------------------------------------------------
-            # nts: (batch, out_seq_len)
+            # nts (np array): (batch, out_seq_len)
             nts = self.predict_notes(x_en=x_en_nt, tk=tk, out_seq_len=out_seq_len, return_str=return_str)
-            # tms: (batch, out_seq_len, 3)
+            # nts = tf.convert_to_tensor(nts, dtype=tf.float32)
+            # tms (np array): (batch, out_seq_len, 3)
             tms = self.predict_time(x_en=x_en_tm, out_seq_len=out_seq_len, vel_norm=vel_norm,
                                     tmps_norm=tmps_norm, dur_norm=dur_norm, return_denorm=return_denorm)
-            return tf.concat([nts[:, :, tf.newaxis], tms], axis=-1)  # (batch, out_seq_len, 4)
+            # tms = tf.convert_to_tensor(tms, dtype=tf.float32)
+            # result = tf.concat([nts[:, :, tf.newaxis], tms], axis=-1)  # (batch, out_seq_len, 4)
+            return nts, tms
 
     def predict_notes(self, x_en, tk, out_seq_len, return_str=True):
         # emb_model is the embedding model
