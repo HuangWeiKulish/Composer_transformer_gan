@@ -62,16 +62,20 @@ class GAN(tf.keras.Model):
             if mode_ in ['notes', 'both'] else None
         self.time_latent = generator.TimeLatent(nlayers=time_latent_nlayers) if mode_ in ['time', 'both'] else None
 
-        self.notes_emb = generator.NotesEmbedder(
-            notes_pool_size=out_notes_pool_size, max_pos=max_pos, embed_dim=embed_dim,
-            dropout_rate=g_embedding_dropout_rate) if mode_ in ['notes', 'both'] else None
+
+        self.gen = generator.Generator(
+            out_notes_pool_size=out_notes_pool_size, embed_dim=embed_dim, n_heads=n_heads, max_pos=max_pos,
+            time_features=time_features, fc_activation=fc_activation, encoder_layers=g_encoder_layers,
+            decoder_layers=g_decoder_layers, fc_layers=g_fc_layers, norm_epsilon=g_norm_epsilon,
+            embedding_dropout_rate=g_embedding_dropout_rate, transformer_dropout_rate=g_transformer_dropout_rate,
+            mode_=mode_, lr_tm=lr_tm, warmup_steps=warmup_steps, custm_lr=custm_lr, optmzr=optmzr)
 
 
-        self.gen = generator.Generator(out_notes_pool_size = 15002, embed_dim = 256, n_heads = 4, max_pos = 800, time_features = 3,
-        fc_activation = "relu", encoder_layers = 2, decoder_layers = 2, fc_layers = 3, norm_epsilon = 1e-6,
-        embedding_dropout_rate = 0.2, transformer_dropout_rate = 0.2, mode_ = 'notes',
-        lr_tm = 0.01, warmup_steps = 4000, custm_lr = True,
-        optmzr = lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9))
+
+
+        # self.notes_emb = generator.NotesEmbedder(
+        #     notes_pool_size=out_notes_pool_size, max_pos=max_pos, embed_dim=embed_dim,
+        #     dropout_rate=g_embedding_dropout_rate) if mode_ in ['notes', 'both'] else None
 
         # self.notes_gen = transformer.Transformer(
         #     embed_dim=embed_dim, n_heads=n_heads, out_notes_pool_size=out_notes_pool_size,
