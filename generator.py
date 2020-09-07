@@ -58,11 +58,10 @@ class NotesLatent(tf.keras.Model):
 
     def __init__(self, nlayers=4, dim_base=4):
         # generate latent vector of dimension; (batch, in_seq_len, embed_dim)
-        # example: input random vector (batch, 16) ==> output latent vector (batch, 16, 256)
+        # example: input random vector (batch, 16, 16) ==> output latent vector (batch, 16, 256)
         super(NotesLatent, self).__init__()
         self.fcs = tf.keras.models.Sequential(
             [tf.keras.layers.Dense(dim_base**i, use_bias=True) for i in range(1, nlayers+1)])
-
     def call(self, x_in):
         # x_in: (batch, in_seq_len, 1)
         return self.fcs(x_in)
@@ -72,30 +71,30 @@ class TimeLatent(tf.keras.Model):
 
     def __init__(self, nlayers=4):
         # generate latent vector of dimension; (batch, in_seq_len, in_features)
-        # example: input random vector (batch, 16) ==> output latent vector (batch, 16, 256)
+        # example: input random vector (batch, 16, 1) ==> output latent vector (batch, 16, 3)
         super(TimeLatent, self).__init__()
         self.fcs = tf.keras.models.Sequential(
-            [tf.keras.layers.Conv1D(filters=4, kernel_size=3, padding='same') for i in range(1, nlayers+1)])
+            [tf.keras.layers.Conv1D(filters=3, kernel_size=3, padding='same') for i in range(1, nlayers+1)])
 
     def call(self, x_in):
         # x_in: (batch, in_seq_len, 1)
         return self.fcs(x_in)
 
 
-class PretrainGenerator(tf.keras.Model):
+class Generator(tf.keras.Model):
 
     def __init__(self, out_notes_pool_size=15002, embed_dim=256, n_heads=4, max_pos=800, time_features=3,
                  fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
                  embedding_dropout_rate=0.2, transformer_dropout_rate=0.2, mode_='notes',
-                 lr_tm=0.01, warmup_steps=4000,
+                 lr_tm=0.01, warmup_steps=4000, custm_lr=True,
                  optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)):
-        super(PretrainGenerator, self).__init__()
+        super(Generator, self).__init__()
         if mode_ == 'notes':
             assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
 
         self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
         self.embed_dim = embed_dim
-        if self.mode_ == 'notes':
+        if custm_lr:
             learning_rate = util.CustomSchedule(self.embed_dim, warmup_steps)
         else:
             learning_rate = lr_tm
@@ -104,49 +103,42 @@ class PretrainGenerator(tf.keras.Model):
 
         self.notes_emb = NotesEmbedder(
             notes_pool_size=out_notes_pool_size, max_pos=max_pos, embed_dim=embed_dim,
-            dropout_rate=embedding_dropout_rate) if mode_ == 'notes' else None
+            dropout_rate=embedding_dropout_rate) if mode_ in ['notes', 'both'] else None
         self.notes_gen = transformer.Transformer(
             embed_dim=embed_dim, n_heads=n_heads, out_notes_pool_size=out_notes_pool_size,
             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
             norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation) \
-            if mode_ == 'notes' else None
+            if mode_ in ['notes', 'both'] else None
 
         # 3 for [velocity, velocity, time since last start, notes duration]
         self.time_gen = transformer.Transformer(
             embed_dim=time_features, n_heads=1, out_notes_pool_size=time_features,
             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
             norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation) \
-            if mode_ == 'time' else None
+            if mode_ in ['time', 'both'] else None
 
-    def call(self, x_en_nt, x_de_nt, x_en_tm, x_de_tm, mask_padding, mask_lookahead):
+    def call(self, x_en_nt, x_en_tm, tk, out_seq_len, return_str=True,
+             vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3, return_denorm=True):
         if self.mode_ == 'notes':
-            # x_en_tm, x_de_tm = None, None
-            # x_en_nt: (batch, in_seq_len, embed_dim)
-            # x_de_nt: (batch, out_seq_len, embed_dim)
-            # x_out_nt: (batch, out_seq_len, out_notes_pool_size)
-            x_out_nt, all_weights_nt = self.notes_gen(
-                x_en=x_en_nt, x_de=x_de_nt, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
-            return x_out_nt, all_weights_nt
+            # x_en_tm = None
+            # x_en_nt: (batch_size, in_seq_len, embed_dim)
+            return self.predict_notes(x_en=x_en_nt, tk=tk, out_seq_len=out_seq_len, return_str=return_str)
         elif self.mode_ == 'time':
-            # x_en_nt, x_de_nt = None, None
-            # x_en_tm: (batch, in_seq_len, 3)
-            # x_de_tm: (batch, out_seq_len, 3)
-            # x_out_tm: (batch, out_seq_len, 3)
-            x_out_tm, all_weights_tm = self.time_gen(
-                x_en=x_en_tm, x_de=x_de_tm, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
-            return x_out_tm, all_weights_tm
+            # x_en_nt = None
+            # tk = None
+            # x_en_tm: (batch_size, in_seq_len, 3)
+            return self.predict_time(x_en=x_en_tm, out_seq_len=out_seq_len, vel_norm=vel_norm,
+                                    tmps_norm=tmps_norm, dur_norm=dur_norm, return_denorm=return_denorm)
         else:  # self.mode_ == 'both'
-            # x_en_nt: (batch, in_seq_len, embed_dim)
-            # x_de_nt: (batch, out_seq_len, embed_dim)
-            # x_out_nt: (batch, out_seq_len, out_notes_pool_size)
-            # x_en_tm: (batch, in_seq_len, 3)
-            # x_de_tm: (batch, out_seq_len, 3)
-            # x_out_tm: (batch, out_seq_len, 3)
-            x_out_nt, all_weights_nt = self.notes_gen(
-                x_en=x_en_nt, x_de=x_de_nt, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
-            x_out_tm, all_weights_tm = self.time_gen(
-                x_en=x_en_tm, x_de=x_de_tm, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
-            return x_out_nt, all_weights_nt, x_out_tm, all_weights_tm
+            # x_en_tm: (batch_size, in_seq_len, 3)
+            # x_en_nt: (batch_size, in_seq_len, embed_dim)
+            # ------------------------------------------------------------------------------------------------
+            # nts: (batch, out_seq_len)
+            nts = self.predict_notes(x_en=x_en_nt, tk=tk, out_seq_len=out_seq_len, return_str=return_str)
+            # tms: (batch, out_seq_len, 3)
+            tms = self.predict_time(x_en=x_en_tm, out_seq_len=out_seq_len, vel_norm=vel_norm,
+                                    tmps_norm=tmps_norm, dur_norm=dur_norm, return_denorm=return_denorm)
+            return tf.concat([nts[:, :, tf.newaxis], tms], axis=-1)  # (batch, out_seq_len, 4)
 
     def predict_notes(self, x_en, tk, out_seq_len, return_str=True):
         # emb_model is the embedding model
@@ -300,9 +292,4 @@ class PretrainGenerator(tf.keras.Model):
                 if self.mode_ in ['time', 'both']:
                     cp_manager_time_gen.save()
                     print('Saved the latest time_gen')
-
-
-
-
-
 
