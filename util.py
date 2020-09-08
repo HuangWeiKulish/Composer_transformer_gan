@@ -117,4 +117,7 @@ def loss_func_time(real, pred):
     return tf.reduce_sum(loss_) / (real.shape[0] * real.shape[1])
 
 
+def model_trainable(model, trainable=True):
+    for layer in model.layers:
+        layer.trainable = trainable
 

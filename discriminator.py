@@ -1,9 +1,5 @@
 import tensorflow as tf
-import util, transformer, generator
-
-notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_embedder'
-notes_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_generator'
-time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_generator'
+import transformer
 
 
 class Discriminator(tf.keras.Model):

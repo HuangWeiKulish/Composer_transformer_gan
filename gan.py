@@ -10,12 +10,16 @@ import discriminator
 import generator
 import time
 
+notes_latent_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_latent'
+time_latent_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_latent'
+
 notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_embedder'
 notes_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_generator'
 time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_generator'
+
 notes_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_discriminator'
 time_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_discriminator'
-discriminator_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/discriminator'
+combine_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/discriminator'
 
 tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_final.pkl'
 tk = pkl.load(open(tk_path, 'rb'))
@@ -88,9 +92,6 @@ class GAN(tf.keras.Model):
         #tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
         pass
 
-    def model_trainable(self, model, trainable=True):
-        pass
-
     def prepare_fake_samples(self, nt_ltnt, tm_ltnt):
         # ---------------------- create latent vectors from random inputs ----------------------
         # (batch, in_seq_len, embed_dim)
@@ -130,7 +131,9 @@ class GAN(tf.keras.Model):
         # nts_tr: (batch, out_seq_len)
         # tms_tr: (batch, out_seq_len, 3)
 
-        # Todo: unfreeze discriminator
+        # unfreeze discriminator ------------------------------------------------------------------
+        if self.train_disc:
+            util.model_trainable(self.disc, trainable=True)
 
         # prepare fake samples ------------------------------------------------------------------
         # nts_fk: (batch, out_seq_len, embed_dim)
@@ -171,7 +174,9 @@ class GAN(tf.keras.Model):
         # nt_ltnt: (batch, in_seq_len, 16)
         # tm_ltnt: (batch, in_seq_len, 1)
 
-        # Todo: freeze discriminator
+        # freeze discriminator ------------------------------------------------------------------
+        if self.train_disc:
+            util.model_trainable(self.disc, trainable=False)
 
         # prepare fake samples ------------------------------------------------------------------
         # nts_fk: (batch, out_seq_len, embed_dim)
@@ -198,11 +203,6 @@ class GAN(tf.keras.Model):
         # predict true or fake sample ------------------------------------------------------------------
         pred_fk = self.disc(nts_fk, tms_fk, de_in)
         return pred_fk, lbl_fk
-
-
-
-
-
 
     def train_step(self, nt_ltnt, tm_ltnt, nts_tr, tms_tr, freeze_disc=True):
         # nt_ltnt: notes random vector (batch, out_seq_len, 16)
@@ -253,22 +253,137 @@ class GAN(tf.keras.Model):
         #     self.train_loss(loss_combine)
         #     return loss_notes, loss_time, loss_combine
 
-    def load_model(self):
-        pass
+    def load_model(self, notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
+                   notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
+                   notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+                   load_notes_ltnt=True, load_time_ltnt=True, load_notes_emb=True,
+                   load_notes_gen=True, load_time_gen=True, load_disc=True,
+                   train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
+                   train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5):
 
+        # ---------------------- call back setting --------------------------
+        # load latent models
+        if self.mode_ in ['notes', 'both']:
+            if load_notes_ltnt:
+                self.cp_notes_ltnt = tf.train.Checkpoint(model=self.notes_latent, optimizer=self.optimizer)
+                self.cp_manager_notes_ltnt = tf.train.CheckpointManager(
+                    self.cp_notes_ltnt, notes_latent_path, max_to_keep=max_to_keep)
+                if self.cp_manager_notes_ltnt.latest_checkpoint:
+                    self.cp_notes_ltnt.restore(self.cp_manager_notes_ltnt.latest_checkpoint)
+                    print('Restored the latest notes_ltnt')
+        if self.mode_ in ['time', 'both']:
+            if load_time_ltnt:
+                self.cp_time_ltnt = tf.train.Checkpoint(model=self.time_latent, optimizer=self.optimizer)
+                self.cp_manager_time_ltnt = tf.train.CheckpointManager(
+                    self.cp_time_ltnt, time_latent_path, max_to_keep=max_to_keep)
+                if self.cp_manager_time_ltnt.latest_checkpoint:
+                    self.cp_time_ltnt.restore(self.cp_manager_time_ltnt.latest_checkpoint)
+                    print('Restored the latest time_ltnt')
 
+        # load notes embedder and generator
+        if self.mode_ in ['notes', 'both']:
+            if load_notes_emb:
+                self.cp_notes_emb = tf.train.Checkpoint(model=self.gen.notes_emb, optimizer=self.optimizer)
+                self.cp_manager_notes_emb = tf.train.CheckpointManager(
+                    self.cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
+                if self.cp_manager_notes_emb.latest_checkpoint:
+                    self.cp_notes_emb.restore(self.cp_manager_notes_emb.latest_checkpoint)
+                    print('Restored the latest notes_emb')
+            if load_notes_gen:
+                self.cp_notes_gen = tf.train.Checkpoint(model=self.gen.notes_gen, optimizer=self.optimizer)
+                self.cp_manager_notes_gen = tf.train.CheckpointManager(
+                    self.cp_notes_gen, notes_gen_path, max_to_keep=max_to_keep)
+                if self.cp_manager_notes_gen.latest_checkpoint:
+                    self.cp_notes_gen.restore(self.cp_manager_notes_gen.latest_checkpoint)
+                    print('Restored the latest notes_gen')
+                    
+        if self.mode_ in ['time', 'both']:
+            if load_time_gen:
+                self.cp_time_gen = tf.train.Checkpoint(model=self.gen.time_gen, optimizer=self.optimizer)
+                self.cp_manager_time_gen = tf.train.CheckpointManager(
+                    self.cp_time_gen, time_gen_path, max_to_keep=max_to_keep)
+                if self.cp_manager_time_gen.latest_checkpoint:
+                    self.cp_time_gen.restore(self.cp_manager_time_gen.latest_checkpoint)
+                    print('Restored the latest time_gen')
+
+        # load discriminator
+        if self.mode_ == 'notes':
+            disc_pth = notes_disc_path
+        elif self.mode_ == 'time':
+            disc_pth = time_disc_path
+        else:  # self.mode_ == 'both'
+            disc_pth = combine_disc_path
+        if load_disc:
+            self.cp_disc = tf.train.Checkpoint(model=self.disc, optimizer=self.optimizer)
+            self.cp_manager_disc = tf.train.CheckpointManager(self.cp_disc, disc_pth, max_to_keep=max_to_keep)
+            if self.cp_manager_disc.latest_checkpoint:
+                self.cp_disc.restore(self.cp_manager_disc.latest_checkpoint)
+                print('Restored the latest discriminator for {}'.format(self.mode_))
+
+        # ---------------------- set trainable --------------------------
+        self.train_ntlatent = train_ntlatent
+        self.train_tmlatent = train_tmlatent
+
+        self.train_ntemb = train_ntemb
+        self.train_ntgen = train_ntgen
+        self.train_tmgen = train_tmgen
+
+        self.train_disc = train_disc
+
+        if train_ntlatent:
+            util.model_trainable(self.notes_latent, trainable=train_ntlatent)
+        if train_tmlatent:
+            util.model_trainable(self.time_latent, trainable=train_tmlatent)
+
+        if train_ntemb & (self.mode_ in ['notes', 'both']):
+            util.model_trainable(self.gen.notes_emb, trainable=train_ntemb)
+        if train_ntgen & (self.mode_ in ['notes', 'both']):
+            util.model_trainable(self.gen.notes_gen, trainable=train_ntgen)
+        if train_tmgen & (self.mode_ in ['time', 'both']):
+            util.model_trainable(self.gen.time_gen, trainable=train_tmgen)
+
+        if train_disc:
+            util.model_trainable(self.disc, trainable=train_disc)
 
     def train(self, epochs=10, nt_tm_loss_weight=(1, 1), save_model_step=1,
-              notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
-              max_to_keep=5, print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
+              print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
               lr_tm=0.01, warmup_steps=4000, custm_lr=True,
               optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
-              freeze_ntgen=False, freeze_tmgen=False, freeze_ntemb=False, freeze_ntlatent=False, freeze_tmlatent=False):
 
-        # Todo: call self.load_model
 
-        # # ---------------------- call back setting --------------------------
+
+              notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
+              notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
+              notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+              load_notes_ltnt=True, load_time_ltnt=True, load_notes_emb=True,
+              load_notes_gen=True, load_time_gen=True, load_disc=True,
+              train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
+              train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5):
+
+        self.load_model(
+            notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
+            notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
+            notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+            load_notes_ltnt=load_notes_ltnt, load_time_ltnt=load_time_ltnt, load_notes_emb=load_notes_emb,
+            load_notes_gen=load_notes_gen, load_time_gen=load_time_gen, load_disc=load_disc,
+            train_ntlatent=train_ntlatent, train_tmlatent=train_tmlatent, train_ntemb=train_ntemb,
+            train_ntgen=train_ntgen, train_tmgen=train_tmgen, train_disc=train_disc, max_to_keep=max_to_keep)
+
+        # 
         # also set for discriminator, notes_discriminator, time_discriminator
+        
+        if custm_lr:
+            learning_rate = util.CustomSchedule(self.embed_dim, warmup_steps)
+        else:
+            learning_rate = lr_tm
+        self.optimizer = optmzr(learning_rate)
+        self.train_loss = tf.keras.metrics.Mean(name='train_loss')
+        
+
+
+            
+            
+            
 
 
 
@@ -329,11 +444,12 @@ notes_latent_dim_base=4
 time_latent_nlayers=4
 mode_='both'
 custm_lr=True
-freeze_ntgen=False
-freeze_tmgen=False
-freeze_ntemb=False
-freeze_ntlatent=False
-freeze_tmlatent=False
+train_ntlatent=True
+train_tmlatent=True
+train_ntemb=True
+train_ntgen=True
+train_tmgen=True
+train_disc=True
 lr_tm=0.01
 warmup_steps=4000
 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
