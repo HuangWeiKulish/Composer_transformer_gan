@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import pickle as pkl
 import tensorflow as tf
 import util
-import transformer
 import discriminator
 import generator
 import time
@@ -48,6 +47,7 @@ class GAN(tf.keras.Model):
         self.true_data = None
         self.in_seq_len = 16
         self.out_seq_len = out_seq_len
+        self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
         self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
         self.embed_dim = embed_dim
         if custm_lr:
@@ -56,8 +56,6 @@ class GAN(tf.keras.Model):
             learning_rate = lr_tm
         self.optimizer = optmzr(learning_rate)
         self.train_loss = tf.keras.metrics.Mean(name='train_loss')
-
-        self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
 
         # ---------------------------------- layers ----------------------------------
         # latent vector generator
@@ -75,13 +73,13 @@ class GAN(tf.keras.Model):
         self.disc = discriminator.Discriminator(
             embed_dim=embed_dim, n_heads=n_heads, kernel_size=d_kernel_size, fc_activation=fc_activation,
             encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
-            norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate, mode_='both')
+            norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate, mode_=mode_)
 
     def load_true_samples(self, tk, step=30, batch_size=10, vel_norm=64.0, tmps_norm=0.12,
                           dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
         self.batch_size = batch_size
         self.true_data = util.load_true_data_gan(
-            tk, self.out_seq_len, step=step, batch_size=10, vel_norm=vel_norm,
+            tk, self.out_seq_len, step=step, batch_size=batch_size, vel_norm=vel_norm,
             tmps_norm=tmps_norm, dur_norm=dur_norm, pths=pths, name_substr_list=name_substr_list)
 
     def call(self, inputs, training=None, mask=None):
@@ -90,83 +88,170 @@ class GAN(tf.keras.Model):
         #tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
         pass
 
-    def train_step(self, nt_ltnt, tm_ltnt, nt_true, tm_true, freeze_disc=True):
+    def model_trainable(self, model, trainable=True):
+        pass
+
+    def prepare_fake_samples(self, nt_ltnt, tm_ltnt):
+        # ---------------------- create latent vectors from random inputs ----------------------
+        # (batch, in_seq_len, embed_dim)
+        nt_ltnt_ = self.notes_latent(nt_ltnt) if self.mode_ in ['notes', 'both'] else None
+        # (batch, in_seq_len, 3)
+        tm_ltnt_ = self.time_latent(tm_ltnt) if self.mode_ in ['time', 'both'] else None
+
+        # ---------------------- generate music from latent vectors ----------------------
+        if self.mode_ == 'notes':
+            # get nts: (batch, out_seq_len)
+            nts = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=self.out_seq_len,
+                           return_str=False, vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
+            nts = tf.convert_to_tensor(nts, dtype=tf.float32)  # convert from numpy to tensor
+            nts = self.gen.notes_emb(nts)
+            return nts
+
+        if self.mode_ == 'time':
+            # get tms: (batch, out_seq_len, 3)
+            tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=self.out_seq_len,
+                           return_str=False, vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
+            tms = tf.convert_to_tensor(tms, dtype=tf.float32)  # convert from numpy to tensor
+            return tms
+
+        # self.mode_ == 'both'
+        # get nts: (batch, out_seq_len) index representation
+        # get tms: (batch, out_seq_len, 3) NOT denormalized
+        nts, tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=self.out_seq_len,
+                            return_str=False, vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
+        nts = tf.convert_to_tensor(nts, dtype=tf.float32)  # convert from numpy to tensor
+        nts = self.gen.notes_emb(nts)
+        tms = tf.convert_to_tensor(tms, dtype=tf.float32)  # convert from numpy to tensor
+        return nts, tms
+
+    def train_discriminator(self, nt_ltnt, tm_ltnt, nts_tr, tms_tr):
+        # nt_ltnt: (batch, in_seq_len, 16)
+        # tm_ltnt: (batch, in_seq_len, 1)
+        # nts_tr: (batch, out_seq_len)
+        # tms_tr: (batch, out_seq_len, 3)
+
+        # Todo: unfreeze discriminator
+
+        # prepare fake samples ------------------------------------------------------------------
+        # nts_fk: (batch, out_seq_len, embed_dim)
+        # tms_fk: (batch, out_seq_len, 3)
+        if self.mode_ == 'notes':
+            tms_fk = None
+            nts_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
+        elif self.mode_ == 'time':
+            tms_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
+            nts_fk = None
+        else:  # self.mode_ == 'both'
+            nts_fk, tms_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
+
+        # prepare true samples ------------------------------------------------------------------
+        # nts_tr: (batch, out_seq_len, embed_dim)
+        if self.mode_ in ['notes', 'both']:
+            nts_tr = self.gen.notes_emb(nts_tr)
+
+        # prepare decode initial input ------------------------------------------------------------------
+        # de_in: (batch, 1, embed_dim)
+        de_in = self.gen.notes_emb(tf.constant([[0]] * self.batch_size * 2, dtype=tf.float32)) \
+            if self.mode_ == 'time' \
+            else self.gen.notes_emb(tf.constant([[self.strt_token_id]] * self.batch_size, dtype=tf.float32))
+
+        # combine samples ------------------------------------------------------------------
+        # nts_comb: (bacth * 2, out_seq_len, embed_dim)
+        # tms_comb: (bacth * 2, out_seq_len, 3)
+        # lbl_comb: (bacth * 2, 1)
+        nts_comb = tf.concat([nts_fk, nts_tr], axis=0) if self.mode_ in ['notes', 'both'] else None
+        tms_comb = tf.concat([tms_fk, tms_tr], axis=0) if self.mode_ in ['time', 'both'] else None
+        lbl_comb = tf.constant([[0]] * self.batch_size + [[1]] * self.batch_size, dtype=tf.float32)
+
+        # predict true or fake sample ------------------------------------------------------------------
+        pred_comb = self.disc(nts_comb, tms_comb, de_in)
+        return pred_comb, lbl_comb
+
+    def train_generator(self, nt_ltnt, tm_ltnt):
+        # nt_ltnt: (batch, in_seq_len, 16)
+        # tm_ltnt: (batch, in_seq_len, 1)
+
+        # Todo: freeze discriminator
+
+        # prepare fake samples ------------------------------------------------------------------
+        # nts_fk: (batch, out_seq_len, embed_dim)
+        # tms_fk: (batch, out_seq_len, 3)
+        if self.mode_ == 'notes':
+            nts_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
+            tms_fk = None
+        elif self.mode_ == 'time':
+            nts_fk = None
+            tms_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
+        else:  # self.mode_ == 'both'
+            nts_fk, tms_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
+
+        # prepare decode initial input ------------------------------------------------------------------
+        # de_in: (batch, 1, embed_dim)
+        de_in = self.gen.notes_emb(tf.constant([[0]] * self.batch_size, dtype=tf.float32)) \
+            if self.mode_ == 'time' \
+            else self.gen.notes_emb(tf.constant([[self.strt_token_id]] * self.batch_size, dtype=tf.float32))
+
+        # combine samples ------------------------------------------------------------------
+        # lbl_fk: (bacth, 1)
+        lbl_fk = tf.constant([[1]] * self.batch_size, dtype=tf.float32)
+
+        # predict true or fake sample ------------------------------------------------------------------
+        pred_fk = self.disc(nts_fk, tms_fk, de_in)
+        return pred_fk, lbl_fk
+
+
+
+
+
+
+    def train_step(self, nt_ltnt, tm_ltnt, nts_tr, tms_tr, freeze_disc=True):
         # nt_ltnt: notes random vector (batch, out_seq_len, 16)
         # tm_ltnt: time random vector (batch, out_seq_len, 1)
 
         with tf.GradientTape() as tape:
 
+
+
+
             # todo: freeze discriminator ?
+            # Todo: 1. train on discriminator with combined true and fake samples;
+            # Todo: 2. generate another batch * 2 of fake samples and train on combined models, with all label True
 
-            # prepare fake samples ==================================================================
-            # ---------------------- create latent vectors from random inputs ----------------------
-            # (batch, in_seq_len, embed_dim)
-            nt_ltnt_ = self.notes_latent(nt_ltnt) if self.mode_ in ['notes', 'both'] else None
-            # (batch, in_seq_len, 3)
-            tm_ltnt_ = self.time_latent(tm_ltnt) if self.mode_ in ['time', 'both'] else None
+            pass
 
-            # ---------------------- generate music from latent vectors ----------------------
-            if self.mode_ == 'notes':
-                # get nts: (batch, out_seq_len)
-                nts = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=self.out_seq_len,
-                               return_str=False, vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
-                nts = tf.convert_to_tensor(nts, dtype=tf.float32)  # convert from numpy to tensor
-            elif self.mode_ == 'time':
-                # get tms: (batch, out_seq_len, 3)
-                tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=self.out_seq_len,
-                               return_str=False, vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
-                tms = tf.convert_to_tensor(tms, dtype=tf.float32)  # convert from numpy to tensor
-            else:  # self.mode_ == 'both'
-                # get nts: (batch, out_seq_len) index representation
-                # get tms: (batch, out_seq_len, 3) NOT denormalized
-                nts, tms = self.gen(x_en_nt=nt_ltnt_, x_en_tm=tm_ltnt_, tk=tk, out_seq_len=self.out_seq_len,
-                                    return_str=False, vel_norm=None, tmps_norm=None, dur_norm=None, return_denorm=False)
-                nts = tf.convert_to_tensor(nts, dtype=tf.float32)  # convert from numpy to tensor
-                tms = tf.convert_to_tensor(tms, dtype=tf.float32)  # convert from numpy to tensor
-
-            # ---------------------- generated notes embedding ----------------------
-            # get nts: (batch, out_seq_len, embed_dim)
-            if self.mode_ in ['notes', 'both']:
-                nts = self.gen.notes_emb(nts)
-
-            # prepare samples ==================================================================
-
-
-
-            # nt_ltnt: notes random vector (batch, out_seq_len, 16)
-            # tm_ltnt: time random vector (batch, out_seq_len, 1)
-
-
-
-
-
-
-
-            # predict true or fake ==================================================================
-            # get decode initial input: (batch, 1, embed_dim)
-            if self.mode_ in ['notes', 'both']:
-                de_in = self.gen.notes_emb(tf.constant([[self.strt_token_id]] * self.batch_size, dtype=tf.float32))
-            else:  # self.mode_ == 'time'
-                de_in = self.gen.notes_emb(tf.constant([[0]] * self.batch_size, dtype=tf.float32))
-
-            # Fake_samples
-
-
-
-
-
-
-
-
-            # ---------------------- discriminator ----------------------
-
-
-            #
-            # strt_token_id
-            #
-            # self.disc(nts, tms, de_in)
-
-
+        #     loss_notes = util.loss_func_notes(x_tar_out[:, :, 0], x_out_nt_pr)
+        #     variables_notes = self.notes_emb.trainable_variables + self.notes_gen.trainable_variables
+        #
+        # if self.mode_ in ['time', 'both']:
+        #     #  x_in_tm: (batch, in_seq_len, 3)
+        #     #  x_tar_in_tm: (batch, out_seq_len, 3)
+        #     #  x_tar_out_tm: (batch, out_seq_len, 3)
+        #     x_in_tm, x_tar_in_tm, x_tar_out_tm = x_in[:, :, 1:], x_tar_in[:, :, 1:], x_tar_out[:, :, 1:]
+        #     # x_out_nt_pr: (batch, out_seq_len, 3)
+        #     x_out_tm_pr, _ = self.time_gen(
+        #         x_en=x_in_tm, x_de=x_tar_in_tm, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
+        #     # the ending value is 0, remove from loss calcultion
+        #     loss_time = util.loss_func_time(x_tar_out_tm[:, :-1, :], x_out_tm_pr[:, :-1, :])
+        #     variables_time = self.time_gen.trainable_variables
+        #
+        # if self.mode_ == 'notes':
+        #     gradients = tape.gradient(loss_notes, variables_notes)
+        #     self.optimizer.apply_gradients(zip(gradients, variables_notes))
+        #     self.train_loss(loss_notes)
+        #     return loss_notes
+        # elif self.mode_ == 'time':
+        #     gradients = tape.gradient(loss_time, variables_time)
+        #     self.optimizer.apply_gradients(zip(gradients, variables_time))
+        #     self.train_loss(loss_time)
+        #     return loss_time
+        # else:  # self.mode_ == 'both'
+        #     variables_combine = variables_notes + variables_time
+        #     loss_combine = (loss_notes * nt_tm_loss_weight[0] +
+        #                     loss_time * nt_tm_loss_weight[1]) / sum(nt_tm_loss_weight)
+        #     gradients = tape.gradient(loss_combine, variables_combine)
+        #     self.optimizer.apply_gradients(zip(gradients, variables_combine))
+        #     self.train_loss(loss_combine)
+        #     return loss_notes, loss_time, loss_combine
 
     def load_model(self):
         pass
@@ -192,30 +277,29 @@ class GAN(tf.keras.Model):
         for epoch in range(epochs):
             self.train_loss.reset_states()
             start = time.time()
-            for true_samples in self.true_data:
+            for i, true_samples in enumerate(self.true_data):
+
                 if true_samples.shape[0] < self.batch_size:
                     #  the last batch generated may be smaller, so go to next round
                     # the unselected samples may be selected next time because data will be shuffled
                     continue
                 # true samples ---------------------------
-                # nt_true: (batch, in_seq_len)
-                # tm_true: (batch, in_seq_len, 3)
-                nt_true, tm_true = true_samples[:, :, 0], true_samples[:, :, 1:]
+                # nts_tr: (batch, in_seq_len)
+                # tms_tr: (batch, in_seq_len, 3)
+                nts_tr, tms_tr = true_samples[:, :, 0], true_samples[:, :, 1:]
                 # random vectors ---------------------------
                 # nt_ltnt: (batch, out_seq_len, 16)
                 # tm_ltnt: (batch, out_seq_len, 1)
                 nt_ltnt = util.latant_vector(self.batch_size, self.in_seq_len, 16, mean_=0.0, std_=1.1)
                 tm_ltnt = util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0.0, std_=1.1)
 
-
-
-
-                losses = self.train_step(nt_ltnt, tm_ltnt, nt_true, tm_true, freeze_disc=True)
-
+                losses = self.train_step(nt_ltnt, tm_ltnt, nts_tr, tms_tr, freeze_disc=True)
 
 
 
 
+                nt_ltnt2 = util.latant_vector(self.batch_size, self.in_seq_len, 16, mean_=0.0, std_=1.1)
+                tm_ltnt2 = util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0.0, std_=1.1)
 
 
 
@@ -406,11 +490,8 @@ strt_token_id=15001
 #             music_ = tf.concat([melody_, x_out_duration], axis=-1)  # (None, None, 2): column: notes_id, duration
 #             de_in = tf.concat((de_in, music_), axis=1)
 #         return de_in
-#
-#
 
-#
-#
+
 #     @staticmethod
 #     def true_samples(all_true_x, n_samples=20):
 #         inds = np.random.randint(0, all_true_x.shape[0], n_samples)
