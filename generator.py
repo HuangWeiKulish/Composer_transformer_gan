@@ -84,6 +84,7 @@ class TimeLatent(tf.keras.Model):
         return self.fcs(x_in)
 
 
+# Todo: put the training opt and lr inside train, not init
 class Generator(tf.keras.Model):
 
     def __init__(self, out_notes_pool_size=15002, embed_dim=256, n_heads=4, max_pos=800, time_features=3,

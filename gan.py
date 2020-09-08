@@ -39,10 +39,7 @@ class GAN(tf.keras.Model):
                  notes_latent_nlayers=4, notes_latent_dim_base=4, time_latent_nlayers=4,
                  out_seq_len=64,
 
-                 mode_='both', custm_lr=True,
-
-                 lr_tm=0.01, warmup_steps=4000,
-                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)):
+                 mode_='both'):
         super(GAN, self).__init__()
         assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
 
@@ -54,12 +51,11 @@ class GAN(tf.keras.Model):
         self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
         self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
         self.embed_dim = embed_dim
-        if custm_lr:
-            learning_rate = util.CustomSchedule(embed_dim, warmup_steps)
-        else:
-            learning_rate = lr_tm
-        self.optimizer = optmzr(learning_rate)
-        self.train_loss = tf.keras.metrics.Mean(name='train_loss')
+
+        self.optimizer_disc = None
+        self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss')
+        self.optimizer_gen = None
+        self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss')
 
         # ---------------------------------- layers ----------------------------------
         # latent vector generator
@@ -91,6 +87,94 @@ class GAN(tf.keras.Model):
 
         #tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
         pass
+
+    def load_model(self, notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
+                   notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
+                   notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+                   load_notes_ltnt=True, load_time_ltnt=True, load_notes_emb=True,
+                   load_notes_gen=True, load_time_gen=True, load_disc=True,
+                   train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
+                   train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5):
+
+        # ---------------------- call back setting --------------------------
+        # load latent models
+        if self.mode_ in ['notes', 'both']:
+            if load_notes_ltnt:
+                self.cp_notes_ltnt = tf.train.Checkpoint(model=self.notes_latent, optimizer=self.optimizer)
+                self.cp_manager_notes_ltnt = tf.train.CheckpointManager(
+                    self.cp_notes_ltnt, notes_latent_path, max_to_keep=max_to_keep)
+                if self.cp_manager_notes_ltnt.latest_checkpoint:
+                    self.cp_notes_ltnt.restore(self.cp_manager_notes_ltnt.latest_checkpoint)
+                    print('Restored the latest notes_ltnt')
+        if self.mode_ in ['time', 'both']:
+            if load_time_ltnt:
+                self.cp_time_ltnt = tf.train.Checkpoint(model=self.time_latent, optimizer=self.optimizer)
+                self.cp_manager_time_ltnt = tf.train.CheckpointManager(
+                    self.cp_time_ltnt, time_latent_path, max_to_keep=max_to_keep)
+                if self.cp_manager_time_ltnt.latest_checkpoint:
+                    self.cp_time_ltnt.restore(self.cp_manager_time_ltnt.latest_checkpoint)
+                    print('Restored the latest time_ltnt')
+
+        # load notes embedder and generator
+        if self.mode_ in ['notes', 'both']:
+            if load_notes_emb:
+                self.cp_notes_emb = tf.train.Checkpoint(model=self.gen.notes_emb, optimizer=self.optimizer)
+                self.cp_manager_notes_emb = tf.train.CheckpointManager(
+                    self.cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
+                if self.cp_manager_notes_emb.latest_checkpoint:
+                    self.cp_notes_emb.restore(self.cp_manager_notes_emb.latest_checkpoint)
+                    print('Restored the latest notes_emb')
+            if load_notes_gen:
+                self.cp_notes_gen = tf.train.Checkpoint(model=self.gen.notes_gen, optimizer=self.optimizer)
+                self.cp_manager_notes_gen = tf.train.CheckpointManager(
+                    self.cp_notes_gen, notes_gen_path, max_to_keep=max_to_keep)
+                if self.cp_manager_notes_gen.latest_checkpoint:
+                    self.cp_notes_gen.restore(self.cp_manager_notes_gen.latest_checkpoint)
+                    print('Restored the latest notes_gen')
+
+        if self.mode_ in ['time', 'both']:
+            if load_time_gen:
+                self.cp_time_gen = tf.train.Checkpoint(model=self.gen.time_gen, optimizer=self.optimizer)
+                self.cp_manager_time_gen = tf.train.CheckpointManager(
+                    self.cp_time_gen, time_gen_path, max_to_keep=max_to_keep)
+                if self.cp_manager_time_gen.latest_checkpoint:
+                    self.cp_time_gen.restore(self.cp_manager_time_gen.latest_checkpoint)
+                    print('Restored the latest time_gen')
+
+        # load discriminator
+        if self.mode_ == 'notes':
+            disc_pth = notes_disc_path
+        elif self.mode_ == 'time':
+            disc_pth = time_disc_path
+        else:  # self.mode_ == 'both'
+            disc_pth = combine_disc_path
+        if load_disc:
+            self.cp_disc = tf.train.Checkpoint(model=self.disc, optimizer=self.optimizer)
+            self.cp_manager_disc = tf.train.CheckpointManager(self.cp_disc, disc_pth, max_to_keep=max_to_keep)
+            if self.cp_manager_disc.latest_checkpoint:
+                self.cp_disc.restore(self.cp_manager_disc.latest_checkpoint)
+                print('Restored the latest discriminator for {}'.format(self.mode_))
+
+        # ---------------------- set trainable --------------------------
+        self.train_ntlatent = train_ntlatent
+        self.train_tmlatent = train_tmlatent
+        self.train_ntemb = train_ntemb
+        self.train_ntgen = train_ntgen
+        self.train_tmgen = train_tmgen
+        self.train_disc = train_disc
+
+        if train_ntlatent:
+            util.model_trainable(self.notes_latent, trainable=train_ntlatent)
+        if train_tmlatent:
+            util.model_trainable(self.time_latent, trainable=train_tmlatent)
+        if train_ntemb & (self.mode_ in ['notes', 'both']):
+            util.model_trainable(self.gen.notes_emb, trainable=train_ntemb)
+        if train_ntgen & (self.mode_ in ['notes', 'both']):
+            util.model_trainable(self.gen.notes_gen, trainable=train_ntgen)
+        if train_tmgen & (self.mode_ in ['time', 'both']):
+            util.model_trainable(self.gen.time_gen, trainable=train_tmgen)
+        if train_disc:
+            util.model_trainable(self.disc, trainable=train_disc)
 
     def prepare_fake_samples(self, nt_ltnt, tm_ltnt):
         # ---------------------- create latent vectors from random inputs ----------------------
@@ -166,9 +250,12 @@ class GAN(tf.keras.Model):
         tms_comb = tf.concat([tms_fk, tms_tr], axis=0) if self.mode_ in ['time', 'both'] else None
         lbl_comb = tf.constant([[0]] * self.batch_size + [[1]] * self.batch_size, dtype=tf.float32)
 
-        # predict true or fake sample ------------------------------------------------------------------
+        # discriminator loss ------------------------------------------------------------------
+        # lbl_comb: (batch, 1)
+        # pred_comb: (batch, 1)
         pred_comb = self.disc(nts_comb, tms_comb, de_in)
-        return pred_comb, lbl_comb
+        loss_disc = tf.keras.losses.binary_crossentropy(lbl_comb, pred_comb, from_logits=False, label_smoothing=0)
+        return loss_disc, self.disc.trainable_variables
 
     def train_generator(self, nt_ltnt, tm_ltnt):
         # nt_ltnt: (batch, in_seq_len, 16)
@@ -189,6 +276,7 @@ class GAN(tf.keras.Model):
             tms_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
         else:  # self.mode_ == 'both'
             nts_fk, tms_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
+            # todo: return the fake sample as well
 
         # prepare decode initial input ------------------------------------------------------------------
         # de_in: (batch, 1, embed_dim)
@@ -200,165 +288,58 @@ class GAN(tf.keras.Model):
         # lbl_fk: (bacth, 1)
         lbl_fk = tf.constant([[1]] * self.batch_size, dtype=tf.float32)
 
-        # predict true or fake sample ------------------------------------------------------------------
+        # generator loss ------------------------------------------------------------------
         pred_fk = self.disc(nts_fk, tms_fk, de_in)
-        return pred_fk, lbl_fk
+        loss_gen = tf.keras.losses.binary_crossentropy(lbl_fk, pred_fk, from_logits=False, label_smoothing=0)
 
-    def train_step(self, nt_ltnt, tm_ltnt, nts_tr, tms_tr, freeze_disc=True):
+        variables_gen = self.trainable_variables
+        if self.mode_ in ['notes', 'both']:
+            variables_gen += self.notes_latent.trainable_variables
+        if self.mode_ in ['time', 'both']:
+            variables_gen += self.time_latent.trainable_variables
+
+        return loss_gen, variables_gen
+
+    def train_step(self, nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr):
         # nt_ltnt: notes random vector (batch, out_seq_len, 16)
         # tm_ltnt: time random vector (batch, out_seq_len, 1)
+        # nt_ltnt2: notes random vector (batch, out_seq_len, 16)
+        # tm_ltnt2: time random vector (batch, out_seq_len, 1)
+        # nts_tr: true sample notes (batch, in_seq_len)
+        # tms_tr: true sample time (batch, in_seq_len, 3)
 
         with tf.GradientTape() as tape:
+            # Step 1. train discriminator with combined true and fake samples;
+            loss_disc, variables_disc = self.train_discriminator(nt_ltnt, tm_ltnt, nts_tr, tms_tr)
+            loss_disc_fake, loss_disc_true = loss_disc[:self.batch_size], loss_disc[self.batch_size:]
 
+            gradients_disc = tape.gradient(loss_disc, variables_disc)
+            self.optimizer_disc.apply_gradients(zip(gradients_disc, variables_disc))
+            self.train_loss_disc(loss_disc)
 
+            # Step 2: freeze discriminator and use the fake sample with true label to train generator
+            loss_gen, variables_gen = self.train_generator(nt_ltnt2, tm_ltnt2)
+            gradients_gen = tape.gradient(loss_gen, variables_gen)
+            self.optimizer_gen.apply_gradients(zip(gradients_gen, variables_gen))
+            self.train_loss_gen(loss_gen)
 
+            # Todo: if trainable variables is empty list, will it affect gradient calculation?????
+        return loss_disc_fake, loss_disc_true, loss_disc, loss_gen
 
-            # todo: freeze discriminator ?
-            # Todo: 1. train on discriminator with combined true and fake samples;
-            # Todo: 2. generate another batch * 2 of fake samples and train on combined models, with all label True
-
-            pass
-
-        #     loss_notes = util.loss_func_notes(x_tar_out[:, :, 0], x_out_nt_pr)
-        #     variables_notes = self.notes_emb.trainable_variables + self.notes_gen.trainable_variables
-        #
-        # if self.mode_ in ['time', 'both']:
-        #     #  x_in_tm: (batch, in_seq_len, 3)
-        #     #  x_tar_in_tm: (batch, out_seq_len, 3)
-        #     #  x_tar_out_tm: (batch, out_seq_len, 3)
-        #     x_in_tm, x_tar_in_tm, x_tar_out_tm = x_in[:, :, 1:], x_tar_in[:, :, 1:], x_tar_out[:, :, 1:]
-        #     # x_out_nt_pr: (batch, out_seq_len, 3)
-        #     x_out_tm_pr, _ = self.time_gen(
-        #         x_en=x_in_tm, x_de=x_tar_in_tm, mask_padding=mask_padding, mask_lookahead=mask_lookahead)
-        #     # the ending value is 0, remove from loss calcultion
-        #     loss_time = util.loss_func_time(x_tar_out_tm[:, :-1, :], x_out_tm_pr[:, :-1, :])
-        #     variables_time = self.time_gen.trainable_variables
-        #
-        # if self.mode_ == 'notes':
-        #     gradients = tape.gradient(loss_notes, variables_notes)
-        #     self.optimizer.apply_gradients(zip(gradients, variables_notes))
-        #     self.train_loss(loss_notes)
-        #     return loss_notes
-        # elif self.mode_ == 'time':
-        #     gradients = tape.gradient(loss_time, variables_time)
-        #     self.optimizer.apply_gradients(zip(gradients, variables_time))
-        #     self.train_loss(loss_time)
-        #     return loss_time
-        # else:  # self.mode_ == 'both'
-        #     variables_combine = variables_notes + variables_time
-        #     loss_combine = (loss_notes * nt_tm_loss_weight[0] +
-        #                     loss_time * nt_tm_loss_weight[1]) / sum(nt_tm_loss_weight)
-        #     gradients = tape.gradient(loss_combine, variables_combine)
-        #     self.optimizer.apply_gradients(zip(gradients, variables_combine))
-        #     self.train_loss(loss_combine)
-        #     return loss_notes, loss_time, loss_combine
-
-    def load_model(self, notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
-                   notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
-                   notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
-                   load_notes_ltnt=True, load_time_ltnt=True, load_notes_emb=True,
-                   load_notes_gen=True, load_time_gen=True, load_disc=True,
-                   train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
-                   train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5):
-
-        # ---------------------- call back setting --------------------------
-        # load latent models
-        if self.mode_ in ['notes', 'both']:
-            if load_notes_ltnt:
-                self.cp_notes_ltnt = tf.train.Checkpoint(model=self.notes_latent, optimizer=self.optimizer)
-                self.cp_manager_notes_ltnt = tf.train.CheckpointManager(
-                    self.cp_notes_ltnt, notes_latent_path, max_to_keep=max_to_keep)
-                if self.cp_manager_notes_ltnt.latest_checkpoint:
-                    self.cp_notes_ltnt.restore(self.cp_manager_notes_ltnt.latest_checkpoint)
-                    print('Restored the latest notes_ltnt')
-        if self.mode_ in ['time', 'both']:
-            if load_time_ltnt:
-                self.cp_time_ltnt = tf.train.Checkpoint(model=self.time_latent, optimizer=self.optimizer)
-                self.cp_manager_time_ltnt = tf.train.CheckpointManager(
-                    self.cp_time_ltnt, time_latent_path, max_to_keep=max_to_keep)
-                if self.cp_manager_time_ltnt.latest_checkpoint:
-                    self.cp_time_ltnt.restore(self.cp_manager_time_ltnt.latest_checkpoint)
-                    print('Restored the latest time_ltnt')
-
-        # load notes embedder and generator
-        if self.mode_ in ['notes', 'both']:
-            if load_notes_emb:
-                self.cp_notes_emb = tf.train.Checkpoint(model=self.gen.notes_emb, optimizer=self.optimizer)
-                self.cp_manager_notes_emb = tf.train.CheckpointManager(
-                    self.cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
-                if self.cp_manager_notes_emb.latest_checkpoint:
-                    self.cp_notes_emb.restore(self.cp_manager_notes_emb.latest_checkpoint)
-                    print('Restored the latest notes_emb')
-            if load_notes_gen:
-                self.cp_notes_gen = tf.train.Checkpoint(model=self.gen.notes_gen, optimizer=self.optimizer)
-                self.cp_manager_notes_gen = tf.train.CheckpointManager(
-                    self.cp_notes_gen, notes_gen_path, max_to_keep=max_to_keep)
-                if self.cp_manager_notes_gen.latest_checkpoint:
-                    self.cp_notes_gen.restore(self.cp_manager_notes_gen.latest_checkpoint)
-                    print('Restored the latest notes_gen')
-                    
-        if self.mode_ in ['time', 'both']:
-            if load_time_gen:
-                self.cp_time_gen = tf.train.Checkpoint(model=self.gen.time_gen, optimizer=self.optimizer)
-                self.cp_manager_time_gen = tf.train.CheckpointManager(
-                    self.cp_time_gen, time_gen_path, max_to_keep=max_to_keep)
-                if self.cp_manager_time_gen.latest_checkpoint:
-                    self.cp_time_gen.restore(self.cp_manager_time_gen.latest_checkpoint)
-                    print('Restored the latest time_gen')
-
-        # load discriminator
-        if self.mode_ == 'notes':
-            disc_pth = notes_disc_path
-        elif self.mode_ == 'time':
-            disc_pth = time_disc_path
-        else:  # self.mode_ == 'both'
-            disc_pth = combine_disc_path
-        if load_disc:
-            self.cp_disc = tf.train.Checkpoint(model=self.disc, optimizer=self.optimizer)
-            self.cp_manager_disc = tf.train.CheckpointManager(self.cp_disc, disc_pth, max_to_keep=max_to_keep)
-            if self.cp_manager_disc.latest_checkpoint:
-                self.cp_disc.restore(self.cp_manager_disc.latest_checkpoint)
-                print('Restored the latest discriminator for {}'.format(self.mode_))
-
-        # ---------------------- set trainable --------------------------
-        self.train_ntlatent = train_ntlatent
-        self.train_tmlatent = train_tmlatent
-
-        self.train_ntemb = train_ntemb
-        self.train_ntgen = train_ntgen
-        self.train_tmgen = train_tmgen
-
-        self.train_disc = train_disc
-
-        if train_ntlatent:
-            util.model_trainable(self.notes_latent, trainable=train_ntlatent)
-        if train_tmlatent:
-            util.model_trainable(self.time_latent, trainable=train_tmlatent)
-
-        if train_ntemb & (self.mode_ in ['notes', 'both']):
-            util.model_trainable(self.gen.notes_emb, trainable=train_ntemb)
-        if train_ntgen & (self.mode_ in ['notes', 'both']):
-            util.model_trainable(self.gen.notes_gen, trainable=train_ntgen)
-        if train_tmgen & (self.mode_ in ['time', 'both']):
-            util.model_trainable(self.gen.time_gen, trainable=train_tmgen)
-
-        if train_disc:
-            util.model_trainable(self.disc, trainable=train_disc)
-
-    def train(self, epochs=10, nt_tm_loss_weight=(1, 1), save_model_step=1,
+    def train(self, epochs=10, save_model_step=1, save_sample_step=5,
               print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
-              lr_tm=0.01, warmup_steps=4000, custm_lr=True,
+              lr_gen=0.01, lr_disc=0.0001, warmup_steps=4000, custm_lr=True,
               optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
-
-
-
               notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
               notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
               notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
               load_notes_ltnt=True, load_time_ltnt=True, load_notes_emb=True,
               load_notes_gen=True, load_time_gen=True, load_disc=True,
               train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
-              train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5):
+              train_ntgen=True, train_tmgen=True, train_disc=True,
+              save_notes_ltnt=True, save_time_ltnt=True, save_notes_emb=True,
+              save_notes_gen=True, save_time_gen=True, save_disc=True,
+              max_to_keep=5):
 
         self.load_model(
             notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
@@ -369,31 +350,21 @@ class GAN(tf.keras.Model):
             train_ntlatent=train_ntlatent, train_tmlatent=train_tmlatent, train_ntemb=train_ntemb,
             train_ntgen=train_ntgen, train_tmgen=train_tmgen, train_disc=train_disc, max_to_keep=max_to_keep)
 
-        # 
-        # also set for discriminator, notes_discriminator, time_discriminator
-        
         if custm_lr:
-            learning_rate = util.CustomSchedule(self.embed_dim, warmup_steps)
-        else:
-            learning_rate = lr_tm
-        self.optimizer = optmzr(learning_rate)
-        self.train_loss = tf.keras.metrics.Mean(name='train_loss')
-        
-
-
-            
-            
-            
-
-
-
+            lr_gen = util.CustomSchedule(self.embed_dim, warmup_steps)
+            lr_disc = util.CustomSchedule(self.embed_dim, warmup_steps)
+        self.optimizer_disc = optmzr(lr_disc)
+        self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
+        self.optimizer_gen = optmzr(lr_gen)
+        self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
 
         # ---------------------- training --------------------------
         for epoch in range(epochs):
-            self.train_loss.reset_states()
+            self.train_loss_disc.reset_states()
+            self.train_loss_gen.reset_states()
+
             start = time.time()
             for i, true_samples in enumerate(self.true_data):
-
                 if true_samples.shape[0] < self.batch_size:
                     #  the last batch generated may be smaller, so go to next round
                     # the unselected samples may be selected next time because data will be shuffled
@@ -407,14 +378,52 @@ class GAN(tf.keras.Model):
                 # tm_ltnt: (batch, out_seq_len, 1)
                 nt_ltnt = util.latant_vector(self.batch_size, self.in_seq_len, 16, mean_=0.0, std_=1.1)
                 tm_ltnt = util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0.0, std_=1.1)
-
-                losses = self.train_step(nt_ltnt, tm_ltnt, nts_tr, tms_tr, freeze_disc=True)
-
-
-
-
+                # nt_ltnt2: (batch, out_seq_len, 16)
+                # tm_ltnt2: (batch, out_seq_len, 1)
                 nt_ltnt2 = util.latant_vector(self.batch_size, self.in_seq_len, 16, mean_=0.0, std_=1.1)
                 tm_ltnt2 = util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0.0, std_=1.1)
+
+                loss_disc_fake, loss_disc_true, loss_disc, loss_gen = self.train_step(
+                    nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr)
+
+                if print_batch:
+                    if (i + 1) % print_batch_step == 0:
+                        print('Epoch {} Batch {}: gen_loss={:.4f}; '
+                              'disc_loss={:.4f} (fake_loss={}, true_loss={});'.format(
+                            epoch+1, i+1, loss_gen.numpy(),
+                            loss_disc.numpy(), loss_disc_fake.numpy(), loss_disc_true.numpy()))
+
+            if print_epoch:
+                if (epoch + 1) % print_epoch_step == 0:
+                    print('Epoch {}: Loss_gen={:.4f}, Loss_disc={:.4f}, Time used={:.4f}'.format(
+                        epoch+1, self.train_loss_gen.result(), self.train_loss_disc.result(), time.time()-start))
+
+            if (epoch+1) % save_model_step == 0:
+                if self.mode_ in ['notes', 'both']:
+                    if save_notes_ltnt:
+                        self.cp_manager_notes_ltnt.save()
+                        print('Saved the latest notes_ltnt')
+                    if save_notes_emb:
+                        self.cp_manager_notes_emb.save()
+                        print('Saved the latest notes_emb')
+                    if save_notes_gen:
+                        self.cp_manager_notes_gen.save()
+                        print('Saved the latest notes_gen')
+
+                if self.mode_ in ['time', 'both']:
+                    if save_time_ltnt:
+                        self.cp_manager_time_ltnt.save()
+                        print('Saved the latest time_ltnt')
+                    if save_time_gen:
+                        self.cp_manager_time_gen.save()
+                        print('Saved the latest time_gen')
+                if save_disc:
+                    self.cp_manager_disc.save()
+                    print('Saved the latest discriminator for {}'.format(self.mode_))
+
+            if save_sample_step:
+                # todo: save midi file from randomly sampled
+                print(save_sample_step)
 
 
 
@@ -687,3 +696,4 @@ strt_token_id=15001
 # g_embedding_dropout_rate=0.2
 # beta=1e10
 # """
+
