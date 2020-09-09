@@ -1,86 +1,87 @@
-from transformer_gan.gan_composer_transformer import GAN, DataPreparation
-import os, glob
+from gan import GAN
 import pickle as pkl
-import numpy as np
 import tensorflow as tf
-from tensorflow.keras.optimizers import Adam
-import matplotlib.pyplot as plt
-from convertor import Conversion
 
-result_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/result'
-model_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/models'
+notes_latent_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_latent'
+time_latent_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_latent'
 
-g_model_path_name = os.path.join(model_path, 'gmodel.h5')
-gan = GAN(g_input_dim=100, g_fc_dim=100, g_fltr_dims=(20, 10, 5, 3, 1, 1), g_knl_dims=(5, 7, 9, 11, 13, 15),
-          g_up_dims=(2, 2, 2, 2, 2, 2), g_bn_momentum=0.6, g_noise_std=0.2, g_final_fltr=1, g_final_knl=5,
-          g_model_path_name=g_model_path_name, g_loaded_trainable=True, g_loss=None,
-          d_fltr_dims=(1, 1, 3, 5, 10, 20), d_knl_dims=(15, 13, 11, 9, 7, 5), d_down_dims=(2, 2, 2, 2, 2, 2),
-          d_bn_momentum=0.6, d_model_path_name=None, d_loaded_trainable=True, d_lr=0.0001, d_clipnorm=1.0,
-          d_loss='mse', d_metrics=['accuracy'],
-          f_lr=0.01, f_clipnorm=1.0, print_model=True, latent_mean=0.0, latent_std=1.1)
+notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_embedder'
+notes_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_generator'
+time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_generator'
 
-# load data =================================
-filepath_list = ['/Users/Wei/Desktop/piano_classic/Chopin_array']  # '/Users/Wei/Desktop/piano_classic/Beethoven/sonata_variations'
-name_substr_list = ['sonat']  # 'variation'
+notes_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_discriminator'
+time_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_discriminator'
+combine_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/discriminator'
 
-x = DataPreparation.batch_preprocessing(
-    length=gan.gmodel.output.shape[1], step=200, filepath_list=filepath_list, name_substr_list=name_substr_list)
-print(x.dtype)
-print(x.shape)
-# print(np.unique(x))
+result_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/result'
+
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_final.pkl'
+tk = pkl.load(open(tk_path, 'rb'))
 
 
-# pre-train gmodel ==========================
-# gan.gmodel.compile(loss=loss_func, optimizer=Adam(lr=0.01, clipnorm=1.0), metrics=['mse'])
-# for i in range(4):
-#     gan.gmodel.fit(d, x, epochs=10, verbose=1, validation_split=0.1, batch_size=20)
-#     gan.gmodel.save(os.path.join(model_path, 'gmodel.h5'))
-#
-# # predict
-# ind = -1
-# pred = gan.gmodel.predict(d[[[ind]]])
-#
-# plt.figure(figsize=(20, 5))
-# pred = np.rint(np.squeeze(pred, axis=0))  # round it to integer
-# plt.plot(range(pred.shape[0]), np.multiply(pred, range(1, 89)), marker='.',
-#          markersize=1, linestyle='')
-# plt.show()
-#
-# # true
-# plt.figure(figsize=(20, 5))
-# plt.plot(range(x[ind].shape[0]), np.multiply(x[ind], range(1, 89)), marker='.',
-#          markersize=1, linestyle='')
-# plt.show()
+# train on time latent -------------------------------------------------
+out_seq_len = 64
+mode_ = 'time'
+gan_model = GAN(strt_token_id=15001, out_notes_pool_size=15002, embed_dim=256, n_heads=4, max_pos=800,
+                time_features=3, fc_activation="relu",
+                g_encoder_layers=2, g_decoder_layers=2, g_fc_layers=3, g_norm_epsilon=1e-6,
+                g_embedding_dropout_rate=0.2, g_transformer_dropout_rate=0.2,
+                d_kernel_size=3, d_encoder_layers=2, d_decoder_layers=2, d_fc_layers=3, d_norm_epsilon=1e-6,
+                d_transformer_dropout_rate=0.2,
+                notes_latent_nlayers=4, notes_latent_dim_base=4, time_latent_nlayers=4, out_seq_len=out_seq_len,
+                mode_=mode_)
+gan_model.load_true_samples(tk, step=30, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
+epochs = 10
+gan_model.train(epochs=epochs, save_model_step=1, save_sample_step=1,
+                print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
+                lr_gen=0.01, lr_disc=0.0001, warmup_steps=4000, custm_lr=True,
+                optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9), tk=tk,
+                notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
+                notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
+                notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+                result_path=result_path,
+                load_notes_ltnt=False, load_time_ltnt=True, load_notes_emb=False,
+                load_notes_gen=False, load_time_gen=True, load_disc=True,
+                train_ntlatent=False, train_tmlatent=True, train_ntemb=False,
+                train_ntgen=False, train_tmgen=False, train_disc=True,
+                save_notes_ltnt=False, save_time_ltnt=True, save_notes_emb=False,
+                save_notes_gen=False, save_time_gen=False, save_disc=True,
+                max_to_keep=5)
+
+# train on notes latent -------------------------------------------------
+out_seq_len = 64
+mode_ = 'notes'
+gan_model = GAN(strt_token_id=15001, out_notes_pool_size=15002, embed_dim=256, n_heads=4, max_pos=800,
+                time_features=3, fc_activation="relu",
+                g_encoder_layers=2, g_decoder_layers=2, g_fc_layers=3, g_norm_epsilon=1e-6,
+                g_embedding_dropout_rate=0.2, g_transformer_dropout_rate=0.2,
+                d_kernel_size=3, d_encoder_layers=2, d_decoder_layers=2, d_fc_layers=3, d_norm_epsilon=1e-6,
+                d_transformer_dropout_rate=0.2,
+                notes_latent_nlayers=4, notes_latent_dim_base=4, time_latent_nlayers=4, out_seq_len=out_seq_len,
+                mode_=mode_)
+gan_model.load_true_samples(tk, step=30, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
+epochs = 30
+gan_model.train(epochs=epochs, save_model_step=1, save_sample_step=1,
+                print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
+                lr_gen=0.01, lr_disc=0.0001, warmup_steps=4000, custm_lr=True,
+                optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9), tk=tk,
+                notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
+                notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
+                notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+                result_path=result_path,
+                load_notes_ltnt=True, load_time_ltnt=False, load_notes_emb=True,
+                load_notes_gen=True, load_time_gen=False, load_disc=True,
+                train_ntlatent=True, train_tmlatent=False, train_ntemb=False,
+                train_ntgen=False, train_tmgen=False, train_disc=True,
+                save_notes_ltnt=True, save_time_ltnt=False, save_notes_emb=False,
+                save_notes_gen=False, save_time_gen=False, save_disc=True,
+                max_to_keep=5)
 
 
-# train gan =================================
-
-for i in range(1000):
-    gan.train(x, n_epoch=50, n_samples=50, save_step=10, n_save=1, verbose=True, save_pic=True,
-              file_save_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/result',
-              model_save_path='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/models')
-    gan = GAN(g_input_dim=100, g_fc_dim=100, g_fltr_dims=(20, 10, 5, 3, 1, 1), g_knl_dims=(5, 7, 9, 11, 13, 15),
-              g_up_dims=(2, 2, 2, 2, 2, 2), g_bn_momentum=0.6, g_noise_std=0.2, g_final_fltr=1, g_final_knl=5,
-              g_model_path_name=os.path.join(model_path, 'gmodel.h5'), g_loaded_trainable=True, g_loss=None,
-              d_fltr_dims=(1, 1, 3, 5, 10, 20), d_knl_dims=(15, 13, 11, 9, 7, 5), d_down_dims=(2, 2, 2, 2, 2, 2),
-              d_bn_momentum=0.6, d_model_path_name=None, d_loaded_trainable=True, d_lr=0.0001, d_clipnorm=1.0,
-              d_loss='mse', d_metrics=['accuracy'],
-              f_lr=0.01, f_clipnorm=1.0, print_model=False, latent_mean=0.0, latent_std=1.1)
-
-# tmp = gan.gmodel.predict(DataPreparation.latant_vector(1, 100, mean_=0.0, std_=1.1))
-# DataPreparation.recover_array(tmp).shape
-
-
-# check =======================
-
-filename = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/result/40_0.pkl'
-file = pkl.load(open(filename, 'rb')).toarray().astype(int) * 80
-
-plt.matshow(file[:1000].T)
 
 
 
-np.unique(file)
-mid_new = Conversion.arry2mid(file, 1)
-mid_new.save('/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer/sample.mid')
+
 
