@@ -1,5 +1,6 @@
 import os
 import glob
+import json
 import numpy as np
 import itertools
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ import util
 import discriminator
 import generator
 import time
+import preprocess
 
 notes_latent_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_latent'
 time_latent_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_latent'
@@ -20,6 +22,8 @@ time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_tr
 notes_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_discriminator'
 time_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_discriminator'
 combine_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/discriminator'
+
+result_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/result'
 
 tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_final.pkl'
 tk = pkl.load(open(tk_path, 'rb'))
@@ -77,15 +81,42 @@ class GAN(tf.keras.Model):
 
     def load_true_samples(self, tk, step=30, batch_size=10, vel_norm=64.0, tmps_norm=0.12,
                           dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
+        self.vel_norm = vel_norm
+        self.tmps_norm = tmps_norm
+        self.dur_norm = dur_norm
         self.batch_size = batch_size
         self.true_data = util.load_true_data_gan(
             tk, self.out_seq_len, step=step, batch_size=batch_size, vel_norm=vel_norm,
             tmps_norm=tmps_norm, dur_norm=dur_norm, pths=pths, name_substr_list=name_substr_list)
 
-    def call(self, inputs, training=None, mask=None):
-        # todo: generate music from latent
-
-        pass
+    def generate_music(self):
+        if self.mode_ == 'notes':
+            nt_ltnt = util.latant_vector(1, self.in_seq_len, 16, mean_=0.0, std_=1.1)  # (1, 16, 16)
+            nt_ltnt = self.notes_latent(nt_ltnt)  # (1, 16, 256)
+            nts = self.gen(x_en_nt=nt_ltnt, x_en_tm=None, tk=tk, out_seq_len=self.out_seq_len,
+                           return_str=True, vel_norm=self.vel_norm, tmps_norm=self.tmps_norm,
+                           dur_norm=self.dur_norm, return_denorm=True)
+            tms = np.array([[self.vel_norm, self.tmps_norm, self.dur_norm]] * self.out_seq_len)[np.newaxis, :, :]
+        elif self.mode_ == 'time':
+            tm_ltnt = util.latant_vector(1, self.in_seq_len, 1, mean_=0.0, std_=1.1)  # (1, 16, 1)
+            tm_ltnt = self.time_latent(tm_ltnt)  # (1, 16, 3)
+            tms = self.gen(x_en_nt=None, x_en_tm=tm_ltnt, tk=tk, out_seq_len=self.out_seq_len,
+                           return_str=True, vel_norm=self.vel_norm, tmps_norm=self.tmps_norm,
+                           dur_norm=self.dur_norm, return_denorm=True)
+            nts = np.array([['64'] * self.out_seq_len])
+        else:  # self.mode_ == 'both'
+            nt_ltnt = util.latant_vector(1, self.in_seq_len, 16, mean_=0.0, std_=1.1)  # (1, 16, 16)
+            tm_ltnt = util.latant_vector(1, self.in_seq_len, 1, mean_=0.0, std_=1.1)  # (1, 16, 1)
+            nt_ltnt = self.notes_latent(nt_ltnt)  # (1, 16, 256)
+            tm_ltnt = self.time_latent(tm_ltnt)  # (1, 16, 3)
+            nts, tms = self.gen(x_en_nt=nt_ltnt, x_en_tm=tm_ltnt, tk=tk, out_seq_len=self.out_seq_len,
+                                return_str=True, vel_norm=self.vel_norm, tmps_norm=self.tmps_norm,
+                                dur_norm=self.dur_norm, return_denorm=True)
+        # nts: (1, out_seq_len), string
+        # tms: (1, out_seq_len, 3)
+        ary = np.squeeze(np.concatenate([nts[:, :, np.newaxis], abs(tms)], axis=-1), axis=0)  # (out_seq_len, 4)
+        mid = preprocess.Conversion.arry2mid(ary)
+        return mid
 
     def load_model(self, notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
                    notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
@@ -275,7 +306,6 @@ class GAN(tf.keras.Model):
             tms_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
         else:  # self.mode_ == 'both'
             nts_fk, tms_fk = self.prepare_fake_samples(nt_ltnt, tm_ltnt)
-            # todo: return the fake sample as well
 
         # prepare decode initial input ------------------------------------------------------------------
         # de_in: (batch, 1, embed_dim)
@@ -297,7 +327,7 @@ class GAN(tf.keras.Model):
         if self.mode_ in ['time', 'both']:
             variables_gen += self.time_latent.trainable_variables
 
-        return loss_gen, variables_gen
+        return loss_gen, variables_gen,
 
     def train_step(self, nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr):
         # nt_ltnt: notes random vector (batch, out_seq_len, 16)
@@ -325,13 +355,14 @@ class GAN(tf.keras.Model):
             # Todo: if trainable variables is empty list, will it affect gradient calculation?????
         return loss_disc_fake, loss_disc_true, loss_disc, loss_gen
 
-    def train(self, epochs=10, save_model_step=1, save_sample_step=5,
+    def train(self, epochs=10, save_model_step=1, save_sample_step=1,
               print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
               lr_gen=0.01, lr_disc=0.0001, warmup_steps=4000, custm_lr=True,
-              optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
+              optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9), tk=tk,
               notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
               notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
               notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+              result_path=result_path,
               load_notes_ltnt=True, load_time_ltnt=True, load_notes_emb=True,
               load_notes_gen=True, load_time_gen=True, load_disc=True,
               train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
@@ -339,6 +370,15 @@ class GAN(tf.keras.Model):
               save_notes_ltnt=True, save_time_ltnt=True, save_notes_emb=True,
               save_notes_gen=True, save_time_gen=True, save_disc=True,
               max_to_keep=5):
+
+        log_current = {'epochs': 1, 'lr_gen': lr_gen, 'lr_disc': lr_disc, 'warmup_steps': warmup_steps,
+                        'custm_lr': custm_lr, 'mode': self.mode_}
+        try:
+            log = json.load(open(os.path.join(result_path, 'log.json'), 'r'))
+            log_current['epochs'] = log[-1]['epochs']
+        except:
+            log = []
+        last_ep = log_current['epochs']
 
         self.load_model(
             notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
@@ -408,7 +448,6 @@ class GAN(tf.keras.Model):
                     if save_notes_gen:
                         self.cp_manager_notes_gen.save()
                         print('Saved the latest notes_gen')
-
                 if self.mode_ in ['time', 'both']:
                     if save_time_ltnt:
                         self.cp_manager_time_ltnt.save()
@@ -420,10 +459,17 @@ class GAN(tf.keras.Model):
                     self.cp_manager_disc.save()
                     print('Saved the latest discriminator for {}'.format(self.mode_))
 
-            if save_sample_step:
-                # todo: save midi file from randomly sampled
-                print(save_sample_step)
+                log_current['epochs'] += epoch
+                log.append(log_current)
+                json.dump(log, open(os.path.join(result_path, 'log.json'), 'w'))
 
+            if (epoch+1) % save_sample_step == 0:
+                mid = self.generate_music()
+                file_name = os.path.join(result_path, self.mode_, 'ep{}.mid'.format(last_ep))
+                mid.save(file_name)
+                print('Saved a fake sample: {}'.format(file_name))
+
+            last_ep += 1
 
 """
 from tensorflow.keras.layers import Input
