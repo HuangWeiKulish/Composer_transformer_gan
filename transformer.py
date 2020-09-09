@@ -47,7 +47,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
 class Transformer(tf.keras.Model):
 
     def __init__(self, embed_dim=256, n_heads=4, out_notes_pool_size=1000, encoder_layers=2, decoder_layers=2,
-                 fc_layers=2, norm_epsilon=1e-6, dropout_rate=0.2, fc_activation="relu"):
+                 fc_layers=2, norm_epsilon=1e-6, dropout_rate=0.2, fc_activation="relu", out_positive=False):
         super(Transformer, self).__init__()
         assert embed_dim % n_heads == 0
         self.n_heads = n_heads
@@ -58,6 +58,7 @@ class Transformer(tf.keras.Model):
         self.norm_epsilon = norm_epsilon
         self.dropout_rate = dropout_rate
         self.fc_activation = fc_activation
+        self.out_positive = out_positive
 
         # layers for encoder -------------------------
         self.mha_en = MultiheadAttention(n_heads, embed_dim)
@@ -102,6 +103,8 @@ class Transformer(tf.keras.Model):
         # if type_ == 'melody': out: (batch, de_time_in, out_notes_pool_size)
         # else: out: (batch, de_time_in, 3)  [velocity, time_passed_since_last_start, duration]
         out = self.final(x_de_)
+        if self.out_positive:
+            out = tf.abs(out)
         return out, all_weights
 
     def transformer_encoder_block(self, x_en, mask_padding):
