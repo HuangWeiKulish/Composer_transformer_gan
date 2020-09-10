@@ -36,7 +36,7 @@ gan_model.load_true_samples(tk, step=60, batch_size=50, vel_norm=64.0, tmps_norm
 epochs = 2
 gan_model.train(epochs=epochs, save_model_step=1, save_sample_step=1,
                 print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
-                lr_gen=0.01, lr_disc=0.0001, warmup_steps=4000, custm_lr=True,
+                lr_gen=0.01, lr_disc=0.0001, warmup_steps=4000,
                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
                 notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
                 notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
@@ -47,6 +47,13 @@ gan_model.train(epochs=epochs, save_model_step=1, save_sample_step=1,
                 save_notes_ltnt=False, save_time_ltnt=True, save_notes_emb=False,
                 save_notes_gen=False, save_time_gen=False, save_disc=True,
                 max_to_keep=5)
+# ValueError: No gradients provided for any variable: ['conv1d/kernel:0', 'conv1d/bias:0', 'conv1d_1/kernel:0', 'conv1d_1/bias:0', 'conv1d_2/kernel:0', 'conv1d_2/bias:0', 'conv1d_3/kernel:0', 'conv1d_3/bias:0'].
+gan_model.time_latent.trainable_variables
+
+
+
+
+
 
 
 # train on notes latent -------------------------------------------------
@@ -60,28 +67,28 @@ gan_model = GAN(strt_token_id=15001, out_notes_pool_size=15002, embed_dim=256, n
                 d_transformer_dropout_rate=0.2,
                 notes_latent_nlayers=4, notes_latent_dim_base=4, time_latent_nlayers=4, out_seq_len=out_seq_len,
                 mode_=mode_)
-gan_model.load_true_samples(tk, step=30, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
-                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
-epochs = 30
+gan_model.load_true_samples(tk, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['noc'])  # todo !!!!!!!!!!
+epochs = 2
 gan_model.train(epochs=epochs, save_model_step=1, save_sample_step=1,
                 print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
-                lr_gen=0.01, lr_disc=0.0001, warmup_steps=4000, custm_lr=True,
-                optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9), tk=tk,
+                lr_gen=0.01, lr_disc=0.0001, warmup_steps=4000,
+                optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
                 notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
                 notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
                 notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
                 result_path=result_path,
-                # load_notes_ltnt=True, load_time_ltnt=False, load_notes_emb=True,
-                # load_notes_gen=True, load_time_gen=False, load_disc=True,
                 train_ntlatent=True, train_tmlatent=False, train_ntemb=False,
                 train_ntgen=False, train_tmgen=False, train_disc=True,
                 save_notes_ltnt=True, save_time_ltnt=False, save_notes_emb=False,
                 save_notes_gen=False, save_time_gen=False, save_disc=True,
                 max_to_keep=5)
 
-
-
-
-
-
+gan_model.disc.discr.trainable_variables
+gan_model.disc.tm_in_expand
+gan_model.disc.name
+gan_model.disc.discr.trainable
+gan_model.notes_latent.trainable_variables
+gan_model.notes_latent.trainable
+# ValueError: No gradients provided for any variable: ['dense/kernel:0', 'dense/bias:0', 'dense_1/kernel:0', 'dense_1/bias:0', 'dense_2/kernel:0', 'dense_2/bias:0', 'dense_3/kernel:0', 'dense_3/bias:0'].
 
