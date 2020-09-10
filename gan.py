@@ -366,7 +366,7 @@ class GAN(tf.keras.Model):
                 if print_batch:
                     if (i + 1) % print_batch_step == 0:
                         print('Epoch {} Batch {}: gen_loss={:.4f}; '
-                              'disc_loss={:.4f} (fake_loss={}, true_loss={});'.format(
+                              'disc_loss={:.4f} (fake_loss={:.4f}, true_loss={:.4f});'.format(
                             epoch+1, i+1, loss_gen.numpy().mean(), loss_disc.numpy().mean(),
                             loss_disc_fake.numpy().mean(), loss_disc_true.numpy().mean()))
 
