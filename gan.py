@@ -288,7 +288,7 @@ class GAN(tf.keras.Model):
 
     def train(self, epochs=10, save_model_step=1, save_sample_step=1,
               print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
-              warmup_steps=1000,
+              warmup_steps=1000, disc_lr=0.0001,
               optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
               notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
               notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
@@ -310,10 +310,11 @@ class GAN(tf.keras.Model):
 
         lr_tm_gen = util.CustomSchedule(self.time_features, warmup_steps)
         lr_gen = util.CustomSchedule(self.embed_dim, warmup_steps)
-        lr_disc = util.CustomSchedule(self.embed_dim, warmup_steps)
+        #lr_disc = util.CustomSchedule(self.embed_dim, warmup_steps)
         self.optimizer_gen = optmzr(lr_tm_gen) if self.mode_ == 'time' else optmzr(lr_gen)
         self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
-        self.optimizer_disc = optmzr(lr_disc)
+        #self.optimizer_disc = optmzr(lr_disc)
+        self.optimizer_disc = optmzr(disc_lr)
         self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
 
         self.train_ntlatent = train_ntlatent
@@ -350,15 +351,16 @@ class GAN(tf.keras.Model):
                 # nt_ltnt: (batch, out_seq_len, 16)
                 # tm_ltnt: (batch, out_seq_len, 1)
                 nt_ltnt = tf.constant(util.latant_vector(
-                    self.batch_size, self.in_seq_len, 16, mean_=0.0, std_=1.1), dtype=tf.float32)
-                tm_ltnt = tf.constant(util.latant_vector(
-                    self.batch_size, self.in_seq_len, 1, mean_=0.0, std_=1.1), dtype=tf.float32)
+                    self.batch_size, self.in_seq_len, 16, mean_=1.0, std_=0.5), dtype=tf.float32)
+                tm_ltnt = tf.constant(abs(util.latant_vector(
+                    self.batch_size, self.in_seq_len, 1, mean_=1.0, std_=0.5)), dtype=tf.float32)
+
                 # nt_ltnt2: (batch, out_seq_len, 16)
                 # tm_ltnt2: (batch, out_seq_len, 1)
                 nt_ltnt2 = tf.constant(util.latant_vector(
-                    self.batch_size, self.in_seq_len, 16, mean_=0.0, std_=1.1), dtype=tf.float32)
-                tm_ltnt2 = tf.constant(util.latant_vector(
-                    self.batch_size, self.in_seq_len, 1, mean_=0.0, std_=1.1), dtype=tf.float32)
+                    self.batch_size, self.in_seq_len, 16, mean_=1.0, std_=0.5), dtype=tf.float32)
+                tm_ltnt2 = tf.constant(abs(util.latant_vector(
+                    self.batch_size, self.in_seq_len, 1, mean_=1.0, std_=0.5)), dtype=tf.float32)
 
                 loss_disc_fake, loss_disc_true, loss_disc, loss_gen = self.train_step(
                     nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr)
@@ -430,8 +432,10 @@ class GAN(tf.keras.Model):
             tms = self.time_latent(tm_ltnt)  # (1, in_seq_len, time_features)
             tms = self.time_gen.predict_time(
                 tms, self.out_seq_len, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm, return_denorm=True)
+            tms[:, 0] = np.clip(tms[:, 0], 0, 127)  # squeeze velocity within limit
 
         ary = np.squeeze(np.concatenate([nts[:, :, np.newaxis], abs(tms)], axis=-1), axis=0)  # (out_seq_len, 4)
+        ary = ary[(ary[:, 0] != '<start>') & (ary[:, 0] != '<end>')]
         mid = preprocess.Conversion.arry2mid(ary)
         return mid
 
