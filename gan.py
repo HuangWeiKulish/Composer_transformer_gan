@@ -198,9 +198,9 @@ class GAN(tf.keras.Model):
         if self.mode_ == 'notes':
             nt_ltnt = self.notes_latent(nt_ltnt)  # (batch, in_seq_len, embed_dim)
             nts_fk = self.notes_gen(nt_ltnt, self.tk, self.out_seq_len)  # (batch, out_seq_len, embed_dim)
-            nts_tr = self.notes_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
+            nts_tr = self.notes_gen.notes_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
             nts_comb = tf.concat([nts_fk, nts_tr], axis=0)  # (bacth * 2, out_seq_len, embed_dim)
-            de_in = self.notes_emb(tf.constant(
+            de_in = self.notes_gen.notes_emb(tf.constant(
                 [[self.strt_token_id]] * self.batch_size * 2, dtype=tf.float32))  # (batch * 2, 1, embed_dim)
             pred_comb = self.disc(nts_comb, de_in)  # (batch * 2, 1)
         elif self.mode_ == 'time':
@@ -212,12 +212,12 @@ class GAN(tf.keras.Model):
         else:  # self.mode_ == 'both'
             nt_ltnt = self.notes_latent(nt_ltnt)  # (batch, in_seq_len, embed_dim)
             nts_fk = self.notes_gen(nt_ltnt, self.tk, self.out_seq_len)  # (batch, out_seq_len, embed_dim)
-            nts_tr = self.notes_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
+            nts_tr = self.notes_gen.notes_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
             nts_comb = tf.concat([nts_fk, nts_tr], axis=0)  # (bacth * 2, out_seq_len, embed_dim)
             tm_ltnt = self.time_latent(tm_ltnt)  # (batch, in_seq_len, time_features)
             tms_fk = self.time_gen(tm_ltnt, self.tk, self.out_seq_len)  # (batch, out_seq_len, time_features)
             tms_comb = tf.concat([tms_fk, tms_tr], axis=0)  # (batch * 2, 1, time_features)
-            de_in = self.notes_emb(tf.constant(
+            de_in = self.notes_gen.notes_emb(tf.constant(
                 [[self.strt_token_id]] * self.batch_size * 2, dtype=tf.float32))  # (batch * 2, 1, embed_dim)
             pred_comb = self.disc(nts_comb, tms_comb, de_in)  # (batch * 2, 1)
 
@@ -237,7 +237,7 @@ class GAN(tf.keras.Model):
         if self.mode_ == 'notes':
             nt_ltnt = self.notes_latent(nt_ltnt)  # (batch, in_seq_len, embed_dim)
             nts_fk = self.notes_gen(nt_ltnt, self.tk, self.out_seq_len)  # (batch, out_seq_len, embed_dim)
-            de_in = self.notes_emb(tf.constant(
+            de_in = self.notes_gen.notes_emb(tf.constant(
                 [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
             pred_fk = self.disc(nts_fk, de_in)  # (batch, 1)
             vbs = self.notes_latent.trainable_variables + self.notes_gen.trainable_variables
@@ -252,7 +252,7 @@ class GAN(tf.keras.Model):
             nts_fk = self.notes_gen(nt_ltnt, self.tk, self.out_seq_len)  # (batch, out_seq_len, embed_dim)
             tm_ltnt = self.time_latent(tm_ltnt)  # (batch, in_seq_len, time_features)
             tms_fk = self.time_gen(tm_ltnt, self.tk, self.out_seq_len)  # (batch, out_seq_len, time_features)
-            de_in = self.notes_emb(tf.constant(
+            de_in = self.notes_gen.notes_emb(tf.constant(
                 [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
             pred_fk = self.disc(nts_fk, tms_fk, de_in)  # (batch, 1)
             vbs = self.notes_latent.trainable_variables + self.notes_gen.trainable_variables + \
@@ -306,7 +306,7 @@ class GAN(tf.keras.Model):
             log_current['epochs'] = log[-1]['epochs']
         except:
             log = []
-        last_ep = log_current['epochs']
+        last_ep = log_current['epochs'] + 1
 
         lr_tm_gen = util.CustomSchedule(self.time_features, warmup_steps)
         lr_gen = util.CustomSchedule(self.embed_dim, warmup_steps)
@@ -399,7 +399,7 @@ class GAN(tf.keras.Model):
                     self.cp_manager_disc.save()
                     print('Saved the latest discriminator for {}'.format(self.mode_))
 
-                log_current['epochs'] += epoch
+                log_current['epochs'] += epoch + 1
                 log.append(log_current)
                 json.dump(log, open(os.path.join(result_path, 'log.json'), 'w'))
 
