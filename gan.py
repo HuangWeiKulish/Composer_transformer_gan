@@ -237,7 +237,11 @@ class GAN(tf.keras.Model):
                 [[self.strt_token_id]] * self.batch_size * 2, dtype=tf.float32))  # (batch * 2, 1, embed_dim)
             pred_comb = self.disc(nts_comb, tms_comb, de_in)  # (batch * 2, 1)
 
-        lbl_comb = tf.constant([[0]] * self.batch_size + [[1]] * self.batch_size, dtype=tf.float32)  # (bacth * 2, 1)
+        lbl_comb = tf.constant(np.concatenate([
+            np.random.uniform(self.fake_label_smooth[0], self.fake_label_smooth[1], (self.batch_size, 1)),
+            np.random.uniform(self.true_label_smooth[0], self.true_label_smooth[1], (self.batch_size, 1))]),
+            dtype=tf.float32)  # (bacth * 2, 1)
+
         loss_disc = tf.keras.losses.binary_crossentropy(lbl_comb, pred_comb, from_logits=False, label_smoothing=0)
         return loss_disc, self.disc.trainable_variables
 
@@ -274,7 +278,11 @@ class GAN(tf.keras.Model):
             vbs = self.notes_latent.trainable_variables + self.notes_gen.trainable_variables + \
                   self.time_latent.trainable_variables + self.time_gen.trainable_variables
 
-        lbls = tf.constant([[1]] * self.batch_size, dtype=tf.float32)
+        # label smoothing
+        lbls = tf.constant(np.random.uniform(
+            self.true_label_smooth[0], self.true_label_smooth[1], (self.batch_size, 1)),
+            dtype=tf.float32)  # (batch, 1)
+
         loss_gen = tf.keras.losses.binary_crossentropy(lbls, pred_fk, from_logits=False, label_smoothing=0)
         return loss_gen, vbs
 
@@ -315,7 +323,7 @@ class GAN(tf.keras.Model):
               save_notes_ltnt=True, save_time_ltnt=True, save_notes_emb=True,
               save_notes_gen=True, save_time_gen=True, save_disc=True,
               max_to_keep=5, load_disc=False, disc_reinit_loss_thres=0.1,
-              nt_ltnt_uniform=True, tm_ltnt_uniform=False):
+              nt_ltnt_uniform=True, tm_ltnt_uniform=False, true_label_smooth=(0.7, 1.0), fake_label_smooth=(0.0, 0.3)):
 
         log_current = {'epochs': 1, 'mode': self.mode_}
         try:
@@ -340,6 +348,9 @@ class GAN(tf.keras.Model):
         self.train_ntgen = train_ntgen
         self.train_tmgen = train_tmgen
         self.train_disc = train_disc
+        self.true_label_smooth = true_label_smooth
+        self.fake_label_smooth = fake_label_smooth
+
         self.load_model(
             notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
             notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
@@ -347,6 +358,7 @@ class GAN(tf.keras.Model):
             train_ntlatent=train_ntlatent, train_tmlatent=train_tmlatent, train_ntemb=train_ntemb,
             train_ntgen=train_ntgen, train_tmgen=train_tmgen, train_disc=train_disc, max_to_keep=max_to_keep,
             load_disc=load_disc)
+
 
         # ---------------------- training --------------------------
         for epoch in range(epochs):

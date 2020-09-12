@@ -17,13 +17,16 @@ time_gen_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_tr
 
 class NotesLatent(tf.keras.Model):
 
-    def __init__(self, nlayers=4, dim_base=4):
+    def __init__(self, nlayers=4, dim_base=4, activ='tanh'):
         # generate latent vector of dimension; (batch, in_seq_len, embed_dim)
         # example: input random vector (batch, 16, 16) ==> output latent vector (batch, 16, 256)
         super(NotesLatent, self).__init__()
         self.fcs = tf.keras.models.Sequential(
             [tf.keras.layers.Input(shape=(16, 16))] +
-            [tf.keras.layers.Dense(dim_base**i, use_bias=True) for i in range(1, nlayers+1)])
+            [tf.keras.models.Sequential([
+                tf.keras.layers.Dense(dim_base**i, use_bias=True, activation=activ),
+                tf.keras.layers.BatchNormalization(momentum=0.8)])
+             for i in range(1, nlayers+1)])
 
     def call(self, x_in):
         # x_in: (batch, in_seq_len, 1)
@@ -32,17 +35,20 @@ class NotesLatent(tf.keras.Model):
 
 class TimeLatent(tf.keras.Model):
 
-    def __init__(self, nlayers=4):
+    def __init__(self, nlayers=4, activ='tanh'):
         # generate latent vector of dimension; (batch, in_seq_len, in_features)
         # example: input random vector (batch, 16, 1) ==> output latent vector (batch, 16, 3)
         super(TimeLatent, self).__init__()
         self.fcs = tf.keras.models.Sequential(
             [tf.keras.layers.Input(shape=(16, 1))] +
-            [tf.keras.layers.Conv1D(filters=3, kernel_size=3, padding='same') for i in range(1, nlayers+1)])
+            [tf.keras.models.Sequential([
+                tf.keras.layers.Conv1D(filters=3, kernel_size=3, padding='same', activation=activ),
+                tf.keras.layers.BatchNormalization(momentum=0.8)])
+                for i in range(1, nlayers+1)])
 
     def call(self, x_in):
-        # x_in: (batch, in_seq_len, 1)
-        return self.fcs(x_in)
+            # x_in: (batch, in_seq_len, 1)
+            return self.fcs(x_in)
 
 
 class NotesEmbedder(tf.keras.Model):
