@@ -52,6 +52,15 @@ class GAN(tf.keras.Model):
         self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
         self.embed_dim = embed_dim
         self.time_features = time_features
+        self.n_heads = n_heads
+
+        self.fc_activation = fc_activation
+        self.d_encoder_layers = d_encoder_layers
+        self.d_decoder_layers = d_decoder_layers
+        self.d_fc_layers = d_fc_layers
+        self.d_norm_epsilon = d_norm_epsilon
+        self.d_transformer_dropout_rate = d_transformer_dropout_rate
+        self.d_kernel_size = d_kernel_size
 
         self.optimizer_disc = None
         self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
@@ -77,21 +86,26 @@ class GAN(tf.keras.Model):
             transformer_dropout_rate=g_transformer_dropout_rate)
 
         # discriminator
+        self.init_disc()
+
+    def init_disc(self):
+
         if self.mode_ == 'notes':
             self.disc = discriminator.NotesDiscriminator(
-                embed_dim=embed_dim, n_heads=n_heads, fc_activation=fc_activation, encoder_layers=d_encoder_layers,
-                decoder_layers=d_decoder_layers, fc_layers=d_fc_layers, norm_epsilon=d_norm_epsilon,
-                transformer_dropout_rate=d_transformer_dropout_rate)
+                embed_dim=self.embed_dim, n_heads=self.n_heads, fc_activation=self.fc_activation,
+                encoder_layers=self.d_encoder_layers, decoder_layers=self.d_decoder_layers, fc_layers=self.d_fc_layers,
+                norm_epsilon=self.d_norm_epsilon, transformer_dropout_rate=self.d_transformer_dropout_rate)
         elif self.mode_ == 'time':
             self.disc = discriminator.TimeDiscriminator(
-                time_features=time_features, fc_activation=fc_activation, encoder_layers=d_encoder_layers,
-                decoder_layers=d_decoder_layers, fc_layers=d_fc_layers, norm_epsilon=d_norm_epsilon,
-                transformer_dropout_rate=d_transformer_dropout_rate)
+                time_features=self.time_features, fc_activation=self.fc_activation,
+                encoder_layers=self.d_encoder_layers, decoder_layers=self.d_decoder_layers, fc_layers=self.d_fc_layers,
+                norm_epsilon=self.d_norm_epsilon, transformer_dropout_rate=self.d_transformer_dropout_rate)
         else:  # self.mode_ == 'both'
             self.disc = discriminator.Discriminator(
-                embed_dim=embed_dim, n_heads=n_heads, kernel_size=d_kernel_size, fc_activation=fc_activation,
-                encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
-                norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate)
+                embed_dim=self.embed_dim, n_heads=self.n_heads, kernel_size=self.d_kernel_size,
+                fc_activation=self.fc_activation, encoder_layers=self.d_encoder_layers,
+                decoder_layers=self.d_decoder_layers, fc_layers=self.d_fc_layers, norm_epsilon=self.d_norm_epsilon,
+                transformer_dropout_rate=self.d_transformer_dropout_rate)
 
     def load_true_samples(self, tk, step=30, batch_size=10, vel_norm=64.0, tmps_norm=0.12,
                           dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
@@ -108,7 +122,8 @@ class GAN(tf.keras.Model):
                    notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
                    notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
                    train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
-                   train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5):
+                   train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5,
+                   load_disc=False):
 
         # ---------------------- call back setting --------------------------
         # load latent models
@@ -149,20 +164,21 @@ class GAN(tf.keras.Model):
             print('Restored the latest time_gen')
 
         # load discriminator
-        if self.mode_ == 'notes':
-            disc_pth = notes_disc_path
-            str_ = 'Restored the latest notes_disc'
-        elif self.mode_ == 'time':
-            disc_pth = time_disc_path
-            str_ = 'Restored the latest time_disc'
-        else:  # self.mode_ == 'both'
-            disc_pth = combine_disc_path
-            str_ = 'Restored the latest combine_disc'
-        self.cp_disc = tf.train.Checkpoint(model=self.disc, optimizer=self.optimizer_disc)
-        self.cp_manager_disc = tf.train.CheckpointManager(self.cp_disc, disc_pth, max_to_keep=max_to_keep)
-        if self.cp_manager_disc.latest_checkpoint:
-            self.cp_disc.restore(self.cp_manager_disc.latest_checkpoint)
-            print(str_)
+        if load_disc:
+            if self.mode_ == 'notes':
+                disc_pth = notes_disc_path
+                str_ = 'Restored the latest notes_disc'
+            elif self.mode_ == 'time':
+                disc_pth = time_disc_path
+                str_ = 'Restored the latest time_disc'
+            else:  # self.mode_ == 'both'
+                disc_pth = combine_disc_path
+                str_ = 'Restored the latest combine_disc'
+            self.cp_disc = tf.train.Checkpoint(model=self.disc, optimizer=self.optimizer_disc)
+            self.cp_manager_disc = tf.train.CheckpointManager(self.cp_disc, disc_pth, max_to_keep=max_to_keep)
+            if self.cp_manager_disc.latest_checkpoint:
+                self.cp_disc.restore(self.cp_manager_disc.latest_checkpoint)
+                print(str_)
 
         # ---------------------- set trainable --------------------------
         self.train_ntlatent = train_ntlatent
@@ -298,7 +314,8 @@ class GAN(tf.keras.Model):
               train_ntgen=True, train_tmgen=True, train_disc=True,
               save_notes_ltnt=True, save_time_ltnt=True, save_notes_emb=True,
               save_notes_gen=True, save_time_gen=True, save_disc=True,
-              max_to_keep=5):
+              max_to_keep=5, load_disc=False, disc_reinit_loss_thres=0.1,
+              nt_ltnt_uniform=True, tm_ltnt_uniform=False):
 
         log_current = {'epochs': 1, 'mode': self.mode_}
         try:
@@ -328,7 +345,8 @@ class GAN(tf.keras.Model):
             notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
             notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
             train_ntlatent=train_ntlatent, train_tmlatent=train_tmlatent, train_ntemb=train_ntemb,
-            train_ntgen=train_ntgen, train_tmgen=train_tmgen, train_disc=train_disc, max_to_keep=max_to_keep)
+            train_ntgen=train_ntgen, train_tmgen=train_tmgen, train_disc=train_disc, max_to_keep=max_to_keep,
+            load_disc=load_disc)
 
         # ---------------------- training --------------------------
         for epoch in range(epochs):
@@ -350,10 +368,13 @@ class GAN(tf.keras.Model):
                 # random vectors ---------------------------
                 # nt_ltnt: (batch, out_seq_len, 16)
                 # tm_ltnt: (batch, out_seq_len, 1)
-                nt_ltnt = tf.constant(util.latant_vector(
-                    self.batch_size, self.in_seq_len, 16, mean_=1.0, std_=0.5), dtype=tf.float32)
-                tm_ltnt = tf.constant(abs(util.latant_vector(
-                    self.batch_size, self.in_seq_len, 1, mean_=1.0, std_=0.5)), dtype=tf.float32)
+                nt_ltnt = np.random.uniform(0, 1.5, (self.batch_size, self.in_seq_len, 16)) if nt_ltnt_uniform \
+                    else util.latant_vector(self.batch_size, self.in_seq_len, 16, mean_=1.0, std_=0.5)
+                nt_ltnt = tf.constant(nt_ltnt, dtype=tf.float32)
+
+                tm_ltnt = np.random.uniform(0, 1.5, (self.batch_size, self.in_seq_len, 1)) if tm_ltnt_uniform \
+                    else util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=1.0, std_=0.5)
+                tm_ltnt = tf.constant(abs(tm_ltnt), dtype=tf.float32)
 
                 # nt_ltnt2: (batch, out_seq_len, 16)
                 # tm_ltnt2: (batch, out_seq_len, 1)
@@ -364,6 +385,10 @@ class GAN(tf.keras.Model):
 
                 loss_disc_fake, loss_disc_true, loss_disc, loss_gen = self.train_step(
                     nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr)
+
+                # re-init discriminator weight once it becomes too strong
+                if loss_disc.numpy().mean() <= disc_reinit_loss_thres:
+                    self.init_disc()
 
                 if print_batch:
                     if (i + 1) % print_batch_step == 0:
@@ -395,7 +420,7 @@ class GAN(tf.keras.Model):
                     if save_time_gen:
                         self.cp_manager_time_gen.save()
                         print('Saved the latest time_gen')
-                if save_disc:
+                if load_disc and save_disc:
                     self.cp_manager_disc.save()
                     print('Saved the latest discriminator for {}'.format(self.mode_))
 
