@@ -326,7 +326,7 @@ class GAN(tf.keras.Model):
               save_notes_ltnt=True, save_time_ltnt=True, save_notes_emb=True,
               save_notes_gen=True, save_time_gen=True, save_disc=True,
               max_to_keep=5, load_disc=False, # disc_reinit_loss_thres=0.1,
-              nt_ltnt_uniform=True, tm_ltnt_uniform=False, true_label_smooth=(0.7, 1.0), fake_label_smooth=(0.0, 0.3)):
+              nt_ltnt_uniform=True, tm_ltnt_uniform=False, true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1)):
 
         log_current = {'epochs': 1, 'mode': self.mode_}
         try:
@@ -369,7 +369,7 @@ class GAN(tf.keras.Model):
             start = time.time()
             for i, true_samples in enumerate(self.true_data):
                 if true_samples.shape[0] < self.batch_size:
-                    #  the last batch generated may be smaller, so go to next round
+                    # the last batch generated may be smaller, so go to next round
                     # the unselected samples may be selected next time because data will be shuffled
                     continue
 
@@ -380,12 +380,12 @@ class GAN(tf.keras.Model):
 
                 # random vectors ---------------------------
                 # nt_ltnt: (batch, out_seq_len, 16)
-                nt_ltnt = np.random.uniform(0, 1.5, (self.batch_size, self.in_seq_len, 16)) if nt_ltnt_uniform \
-                    else util.latant_vector(self.batch_size, self.in_seq_len, 16, mean_=1.0, std_=0.5)
+                nt_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_seq_len, 16)) if nt_ltnt_uniform \
+                    else util.latant_vector(self.batch_size, self.in_seq_len, 16, mean_=0, std_=1.5)
                 nt_ltnt = tf.constant(nt_ltnt, dtype=tf.float32)
                 # tm_ltnt: (batch, out_seq_len, 1)
-                tm_ltnt = np.random.uniform(0, 1.5, (self.batch_size, self.in_seq_len, 1)) if tm_ltnt_uniform \
-                    else util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=1.0, std_=0.5)
+                tm_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_seq_len, 1)) if tm_ltnt_uniform \
+                    else util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0, std_=1.5)
                 tm_ltnt = tf.constant(abs(tm_ltnt), dtype=tf.float32)
 
                 # nt_ltnt2: (batch, out_seq_len, 16)
@@ -408,6 +408,12 @@ class GAN(tf.keras.Model):
                               'disc_true_loss={:.4f};'.format(
                             epoch+1, i+1, loss_gen.numpy().mean(), loss_disc_fk.numpy().mean(),
                             loss_disc_tr.numpy().mean()))
+
+                if (i + 1) % 500 == 0:
+                    mid = self.generate_music()
+                    file_name = os.path.join(result_path, self.mode_, 'ep{}_{}.mid'.format(last_ep, i+1))
+                    mid.save(file_name)
+                    print('Saved a fake sample: {}'.format(file_name))
 
             if print_epoch:
                 if (epoch + 1) % print_epoch_step == 0:
@@ -442,7 +448,7 @@ class GAN(tf.keras.Model):
 
             if (epoch+1) % save_sample_step == 0:
                 mid = self.generate_music()
-                file_name = os.path.join(result_path, self.mode_, 'ep{}.mid'.format(last_ep))
+                file_name = os.path.join(result_path, self.mode_, 'ep{}_end.mid'.format(last_ep))
                 mid.save(file_name)
                 print('Saved a fake sample: {}'.format(file_name))
 
