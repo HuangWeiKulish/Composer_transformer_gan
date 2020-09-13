@@ -78,8 +78,8 @@ gan_model.train(epochs=epochs, save_model_step=16, save_sample_step=1,
                 train_ntgen=False, train_tmgen=False, train_disc=True,
                 save_notes_ltnt=True, save_time_ltnt=False, save_notes_emb=False,
                 save_notes_gen=False, save_time_gen=False, save_disc=True, max_to_keep=5,
-                load_disc=False, disc_reinit_loss_thres=0.01, nt_ltnt_uniform=True, tm_ltnt_uniform=False,
-                true_label_smooth=(0.7, 1.0), fake_label_smooth=(0.0, 0.3))
+                load_disc=True, disc_reinit_loss_thres=0.01, nt_ltnt_uniform=True, tm_ltnt_uniform=False,
+                true_label_smooth=(0.8, 1.0), fake_label_smooth=(0.0, 0.2))
 
 # Todo: switch load_disc=True and save_disc=True once generator loss is lowered
 
