@@ -325,7 +325,7 @@ class GAN(tf.keras.Model):
               train_ntgen=True, train_tmgen=True, train_disc=True,
               save_notes_ltnt=True, save_time_ltnt=True, save_notes_emb=True,
               save_notes_gen=True, save_time_gen=True, save_disc=True,
-              max_to_keep=5, load_disc=False, disc_reinit_loss_thres=0.1,
+              max_to_keep=5, load_disc=False, # disc_reinit_loss_thres=0.1,
               nt_ltnt_uniform=True, tm_ltnt_uniform=False, true_label_smooth=(0.7, 1.0), fake_label_smooth=(0.0, 0.3)):
 
         log_current = {'epochs': 1, 'mode': self.mode_}
@@ -361,7 +361,6 @@ class GAN(tf.keras.Model):
             train_ntgen=train_ntgen, train_tmgen=train_tmgen, train_disc=train_disc, max_to_keep=max_to_keep,
             load_disc=load_disc)
 
-
         # ---------------------- training --------------------------
         for epoch in range(epochs):
             self.train_loss_disc.reset_states()
@@ -381,19 +380,18 @@ class GAN(tf.keras.Model):
 
                 # random vectors ---------------------------
                 # nt_ltnt: (batch, out_seq_len, 16)
-                # tm_ltnt: (batch, out_seq_len, 1)
                 nt_ltnt = np.random.uniform(0, 1.5, (self.batch_size, self.in_seq_len, 16)) if nt_ltnt_uniform \
                     else util.latant_vector(self.batch_size, self.in_seq_len, 16, mean_=1.0, std_=0.5)
                 nt_ltnt = tf.constant(nt_ltnt, dtype=tf.float32)
-
+                # tm_ltnt: (batch, out_seq_len, 1)
                 tm_ltnt = np.random.uniform(0, 1.5, (self.batch_size, self.in_seq_len, 1)) if tm_ltnt_uniform \
                     else util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=1.0, std_=0.5)
                 tm_ltnt = tf.constant(abs(tm_ltnt), dtype=tf.float32)
 
                 # nt_ltnt2: (batch, out_seq_len, 16)
-                # tm_ltnt2: (batch, out_seq_len, 1)
                 nt_ltnt2 = tf.constant(util.latant_vector(
                     self.batch_size * 2, self.in_seq_len, 16, mean_=1.0, std_=0.5), dtype=tf.float32)
+                # tm_ltnt2: (batch, out_seq_len, 1)
                 tm_ltnt2 = tf.constant(abs(util.latant_vector(
                     self.batch_size * 2, self.in_seq_len, 1, mean_=1.0, std_=0.5)), dtype=tf.float32)
 
@@ -401,13 +399,13 @@ class GAN(tf.keras.Model):
                     nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr)
 
                 # re-init discriminator weight once it becomes too strong
-                if loss_disc_fk.numpy().mean() <= disc_reinit_loss_thres:
-                    self.init_disc()
+                # if loss_disc_fk.numpy().mean() <= disc_reinit_loss_thres:
+                #     self.init_disc()
 
                 if print_batch:
                     if (i + 1) % print_batch_step == 0:
                         print('Epoch {} Batch {}: gen_loss={:.4f}; disc_fake_loss={:.4f}, '
-                              'disc_true_loss={:.4f});'.format(
+                              'disc_true_loss={:.4f};'.format(
                             epoch+1, i+1, loss_gen.numpy().mean(), loss_disc_fk.numpy().mean(),
                             loss_disc_tr.numpy().mean()))
 

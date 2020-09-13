@@ -47,7 +47,7 @@ gan_model.train(epochs=epochs, save_model_step=1, save_sample_step=1,
                 train_ntgen=False, train_tmgen=False, train_disc=True,
                 save_notes_ltnt=False, save_time_ltnt=True, save_notes_emb=False,
                 save_notes_gen=False, save_time_gen=False, save_disc=False, max_to_keep=5,
-                load_disc=False, disc_reinit_loss_thres=0.1, nt_ltnt_uniform=True, tm_ltnt_uniform=False,
+                load_disc=False, nt_ltnt_uniform=True, tm_ltnt_uniform=False,
                 true_label_smooth=(0.7, 1.0), fake_label_smooth=(0.0, 0.3))
 # Todo: switch load_disc=True and save_disc=True once generator loss is lowered
 
@@ -63,12 +63,12 @@ gan_model = GAN(strt_token_id=15001, out_notes_pool_size=15002, embed_dim=256, n
                 d_transformer_dropout_rate=0.2,
                 notes_latent_nlayers=4, notes_latent_dim_base=4, time_latent_nlayers=4, out_seq_len=out_seq_len,
                 mode_=mode_)
-gan_model.load_true_samples(tk, step=20, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+gan_model.load_true_samples(tk, step=20, batch_size=80, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
                             pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])  # Todo!!!!!
 epochs = 20
 gan_model.train(epochs=epochs, save_model_step=16, save_sample_step=1,
                 print_batch=True, print_batch_step=20, print_epoch=True, print_epoch_step=1,
-                warmup_steps=500, disc_lr=0.00001, gen_lr=0.02,
+                warmup_steps=500, disc_lr=0.0005, gen_lr=0.05,
                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
                 notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
                 notes_emb_path=notes_emb_path, notes_gen_path=notes_gen_path, time_gen_path=time_gen_path,
@@ -78,7 +78,7 @@ gan_model.train(epochs=epochs, save_model_step=16, save_sample_step=1,
                 train_ntgen=False, train_tmgen=False, train_disc=True,
                 save_notes_ltnt=True, save_time_ltnt=False, save_notes_emb=False,
                 save_notes_gen=False, save_time_gen=False, save_disc=True, max_to_keep=5,
-                load_disc=True, disc_reinit_loss_thres=0.01, nt_ltnt_uniform=True, tm_ltnt_uniform=False,
+                load_disc=True, nt_ltnt_uniform=True, tm_ltnt_uniform=False,
                 true_label_smooth=(0.75, 1.0), fake_label_smooth=(0.0, 0.25))
 
 # Todo: switch load_disc=True and save_disc=True once generator loss is lowered
