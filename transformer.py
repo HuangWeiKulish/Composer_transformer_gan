@@ -12,7 +12,8 @@ class MultiheadAttention(tf.keras.layers.Layer):
         self.k_w = tf.keras.layers.Dense(embed_dim)
         self.v_w = tf.keras.layers.Dense(embed_dim)
 
-    def call(self, q, k, v, mask=None):
+    def call(self, inputs, training=None, mask=None):
+        q, k, v = inputs
         query = self.q_w(q)  # (batch, time_out, embed_dim)
         key = self.k_w(k)  # (batch, time_in, embed_dim)
         value = self.v_w(v)  # (batch, time_in, embed_dim)
@@ -82,14 +83,17 @@ class Transformer(tf.keras.Model):
         # layer for output --------------------------
         self.final = tf.keras.layers.Dense(out_notes_pool_size)
 
-    def call(self, x_en, x_de, mask_padding, mask_lookahead):
+    def call(self, inputs, training=None, mask=None):
         # x_en: (batch, en_time_in, embed_dim)
         # x_de: (batch, de_time_in, embed_dim)
+        x_en, x_de, mask_padding, mask_lookahead = inputs
 
         # --------------------------- encoder ---------------------------
         x_en_ = x_en
         for i in range(self.encoder_layers):
             x_en_ = self.transformer_encoder_block(x_en=x_en_, mask_padding=mask_padding)
+
+            # todo: add noise
 
         # --------------------------- decoder ---------------------------
         all_weights = dict()
@@ -98,6 +102,7 @@ class Transformer(tf.keras.Model):
             x_de_, all_weights['de_' + str(i + 1) + '_att_1'], all_weights['de_' + str(i + 1) + '_att_2'] = \
                 self.transformer_decoder_block(
                     x_de=x_de_, en_out=x_en_, mask_lookahead=mask_lookahead, mask_padding=mask_padding)
+            # todo: add noise
 
         # --------------------------- output ---------------------------
         # if type_ == 'melody': out: (batch, de_time_in, out_notes_pool_size)
@@ -111,7 +116,8 @@ class Transformer(tf.keras.Model):
         # x_en dim: (batch, time_in, embed_dim)
         # --------------------------- sub-layer 1 ---------------------------
         # attention: (batch, time_in, embed_dim), att_weights: (batch, n_heads, length, length)
-        attention, att_weights = self.mha_en(q=x_en, k=x_en, v=x_en, mask=mask_padding)
+        # q=x_en, k=x_en, v=x_en
+        attention, att_weights = self.mha_en((x_en, x_en, x_en), mask=mask_padding)
         attention = tf.keras.layers.Dropout(self.dropout_rate)(attention)  # (batch, time_in, embed_dim)
         skip_conn_1 = tf.keras.layers.Add()([x_en, attention])  # (batch, time_in, embed_dim)
         skip_conn_1 = self.ln_en(skip_conn_1)  # (batch, time_in, embed_dim)
@@ -126,7 +132,8 @@ class Transformer(tf.keras.Model):
         # en_out dim: (batch, en_time_in, embed_dim)
         # --------------------------- sub-layer 1 ---------------------------
         # attention_1: (batch, de_time_in, embed_dim), att_weights_1: (batch, n_heads, length, length)
-        attention_1, att_weights_1 = self.mha1_de(q=x_de, k=x_de, v=x_de, mask=mask_lookahead)
+        # q=x_de, k=x_de, v=x_de
+        attention_1, att_weights_1 = self.mha1_de((x_de, x_de, x_de), mask=mask_lookahead)
         attention_1 = tf.keras.layers.Dropout(self.dropout_rate)(attention_1)  # (batch, de_time_in, embed_dim)
         skip_conn_1 = tf.keras.layers.Add()([x_de, attention_1])  # (batch, de_time_in, embed_dim)
         skip_conn_1 = self.ln1_de(skip_conn_1)  # (batch, de_time_in, embed_dim)
@@ -134,7 +141,8 @@ class Transformer(tf.keras.Model):
         # --------------------------- sub-layer 2 ---------------------------
         # attention_2: (batch, time_in, embed_dim), att_weights_2: (batch, n_heads, length, length)
         # input tuple: (query: skip_conn_1, key: encoder_out, value: encoder_out)
-        attention_2, att_weights_2 = self.mha2_de(q=skip_conn_1, k=en_out, v=en_out, mask=mask_padding)
+        # q=skip_conn_1, k=en_out, v=en_out
+        attention_2, att_weights_2 = self.mha2_de((skip_conn_1, en_out, en_out), mask=mask_padding)
         attention_2 = tf.keras.layers.Dropout(self.dropout_rate)(attention_2)  # (batch, de_time_in, embed_dim)
         skip_conn_2 = tf.keras.layers.Add()([attention_2, skip_conn_1])  # (batch, de_time_in, embed_dim)
         skip_conn_2 = self.ln2_de(skip_conn_2)  # (batch, de_time_in, embed_dim)

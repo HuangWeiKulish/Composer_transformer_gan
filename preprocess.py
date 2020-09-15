@@ -722,6 +722,10 @@ print(len(json.loads(tk.get_config()['word_counts'])))  # 15002
 tk_path_final='/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_final.pkl'       
 pkl.dump(tk, open(tk_path_final, 'wb'))
 
+number_of_categories = len(json.loads(tk.get_config()['word_counts']))
+desired_emb_size = number_of_categories**0.25
+print(desired_emb_size)
+
 """
 
 
