@@ -93,9 +93,6 @@ class Transformer(tf.keras.models.Model):
         x_en_ = x_en
         for i in range(self.encoder_layers):
             x_en_ = self.transformer_encoder_block(x_en=x_en_, mask_padding=mask_padding, i=i)
-
-            # todo: add noise
-
         # --------------------------- decoder ---------------------------
         all_weights = dict()
         x_de_ = x_de
@@ -103,8 +100,6 @@ class Transformer(tf.keras.models.Model):
             x_de_, all_weights['de_' + str(i + 1) + '_att_1'], all_weights['de_' + str(i + 1) + '_att_2'] = \
                 self.transformer_decoder_block(
                     x_de=x_de_, en_out=x_en_, mask_lookahead=mask_lookahead, mask_padding=mask_padding, i=i)
-            # todo: add noise
-
         # --------------------------- output ---------------------------
         # if type_ == 'melody': out: (batch, de_time_in, out_notes_pool_size)
         # else: out: (batch, de_time_in, 3)  [velocity, time_passed_since_last_start, duration]
@@ -154,7 +149,4 @@ class Transformer(tf.keras.models.Model):
         skip_conn_3 = tf.keras.layers.Add()([fc, skip_conn_2])  # (batch, de_time_in, embed_dim)
         out = self.ln3_de(skip_conn_3)  # (batch, de_time_in, embed_dim)
         return out, att_weights_1, att_weights_2
-
-
-
 

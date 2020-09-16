@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import tensorflow as tf
+import tensorflow_addons as tfa
 import util
 import transformer
 
@@ -8,7 +9,7 @@ tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_embedder'
-notes_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_extend'
+notes_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_extender'
 time_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_extender'
 
 vel_norm = 64.0
@@ -22,22 +23,15 @@ dur_norm = 1.3
 # Input b and g should be 1x1xC
 class AdaInstanceNormalization(tf.keras.layers.Layer):
 
-    def __init__(self, axis=-1, momentum=0.99, epsilon=1e-3, center=True, scale=True):
+    def __init__(self, epsilon=1e-3):
         super(AdaInstanceNormalization, self).__init__()
-        self.axis = axis
-        self.momentum = momentum
         self.epsilon = epsilon
-        self.center = center
-        self.scale = scale
 
     def call(self, inputs, training=None):
         input_shape = tf.keras.backend.int_shape(inputs[0])
         reduction_axes = list(range(0, len(input_shape)))
         beta = inputs[1]
         gamma = inputs[2]
-        if self.axis is not None:
-            del reduction_axes[self.axis]
-        del reduction_axes[0]
         mean = tf.keras.backend.mean(inputs[0], reduction_axes, keepdims=True)
         stddev = tf.keras.backend.std(inputs[0], reduction_axes, keepdims=True) + self.epsilon
         normed = (inputs[0] - mean) / stddev
@@ -51,74 +45,12 @@ class Mapping(tf.keras.layers.Layer):
         self.fcs = tf.keras.models.Sequential([tf.keras.layers.Dense(1, activation=activ) for i in range(fc_layers)])
 
     def call(self, x, training=None):
-        # x_in: (batch, in_dim, 1)
-        return self.fcs(x, training=training)  # (batch, in_dim, 1)
-
-
-class Synthesis(tf.keras.layers.Layer):
-
-    def __init__(self, out_dim=16, knl_size=5, fltr_size=16,
-                 activ=tf.keras.layers.LeakyReLU(alpha=0.1)):
-        # generate latent vector of dimension; (batch, in_seq_len, in_features)
-        # input: tf.keras.layers.Input(shape=(in_dim, 1))
-        # example: input random time vector (batch, 16, 1) ==> output latent vector (batch, 16, 3)
-        #          input random notes vector (batch, 16, 1) ==> output latent vector (batch, 16, 16)
-        super(Synthesis, self).__init__()
-        self.fltr_size = fltr_size
-        self.knl_size = knl_size
-        self.strides = 2
-
-        conv_layers = int(np.log(out_dim) / np.log(2))
-        self.convs = tf.keras.models.Sequential(
-            [tf.keras.models.Sequential([
-                tf.keras.layers.Conv1DTranspose(
-                    filters=fltr_size, kernel_size=knl_size, strides=self.strides, padding='same', activation=activ),
-                tf.keras.layers.BatchNormalization(momentum=0.8)]) for i in range(conv_layers-1)])
-
-    def call(self, x_const, training=None, mask=None):
-        # x_const = (x, const)
-        # in_dim=256; strt_dim=2
         # x: (batch, in_dim, 1)
-        # const: (batch, strt_dim, in_dim)
-        x = tf.matmul(x_const[1], x_const[0])  # (batch, strt_dim, 1)
-        x = self.convs(x)  # (batch, strt_dim, fltr_size)
-        return x
-
-    def up_block(self, inputs):
-        # inputs = (conv_in, style_in, noise)
-        # conv_in: (batch, updated strt_dim, in_dim)
-        # style_in: (batch, updated strt_dim, 1)
-        # noise: (batch, 1, 1)
-        b = tf.keras.layers.Dense(
-            self.fltr_size, kernel_initializer='he_normal',
-            bias_initializer='ones')(inputs[1])  # (batch, updated strt_dim, fltr_size)
-        #b = tf.keras.layers.Reshape([1, fltr_size])(b)
-        g = tf.keras.layers.Dense(
-            self.fltr_size, kernel_initializer='he_normal',
-            bias_initializer='zeros')(inputs[1])  # (batch, updated strt_dim, fltr_size)
-        #g = tf.keras.layers.Reshape([1, 1, fltr_size])(g)
-
-        n = tf.keras.layers.Conv1D(
-            filters=self.fltr_size, kernel_size=1, padding='same', kernel_initializer='zeros',
-            bias_initializer='zeros')(inputs[2])  # (batch, fltr_size)
-        out = tf.keras.layers.Conv1DTranspose(
-            filters=self.fltr_size, kernel_size=self.knl_size, strides=self.strides, padding='same',
-            activation=self.activ)(inputs[0])  # (batch, (updated strt_dim) * strides, fltr_size)
-
-        out = tf.add(out, n)  # (batch, (updated strt_dim) * strides, fltr_size)
-
-
-
-
-
-        out = AdaInstanceNormalization()([out, b, g])
-
-
-
-        tf.keras.layers.BatchNormalization(momentum=0.8)
-
-
-        AdaInstanceNormalization()([out, b, g])
+        mean_ = tf.math.reduce_mean(x, axis=[1])
+        std_ = tf.math.reduce_std(x, axis=[1]) + tf.constant([0.0001], dtype=tf.float32)
+        out = (x - mean_) / std_
+        out = self.fcs(out, training=training)  # (batch, in_dim, 1)
+        return out
 
 
 class NotesEmbedder(tf.keras.layers.Layer):
@@ -134,7 +66,7 @@ class NotesEmbedder(tf.keras.layers.Layer):
     def call(self, x_in, training=None):
         # x_in dim: (batch, time_in): notes index
         # --------------------------- split x into x_notes and x_duration ---------------------------
-        #x_notes = tf.keras.layers.Lambda(lambda x_: x_[:, :, 0])(x_in)  # (batch, time_in), the string encoding of notes
+        # x_notes = tf.keras.layers.Lambda(lambda x_: x_[:, :, 0])(x_in)  # (batch, time_in), the string encoding of notes
         # --------------------------- embedding ---------------------------
         notes_emb = self.embedder(x_in)  # (batch, time_in, embed_dim)
         pos_emb = NotesEmbedder.positional_encoding(self.max_pos, self.embed_dim)  # (1, max_pos, embed_dim)
@@ -165,11 +97,12 @@ class NotesEmbedder(tf.keras.layers.Layer):
 
 class NotesExtend(tf.keras.models.Model):
 
-    def __init__(self, out_notes_pool_size=15002, embed_dim=16, n_heads=4, max_pos=800,
+    def __init__(self, strt_token_id=15001, out_notes_pool_size=15002, embed_dim=16, n_heads=4, max_pos=800,
                  fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
                  embedding_dropout_rate=0.2, transformer_dropout_rate=0.2):
         super(NotesExtend, self).__init__()
         assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
+        self.strt_token_id = strt_token_id# tk.word_index['<start>']
         self.embed_dim = embed_dim
         self.notes_emb = NotesEmbedder(
             notes_pool_size=out_notes_pool_size, max_pos=max_pos, embed_dim=embed_dim,
@@ -183,9 +116,9 @@ class NotesExtend(tf.keras.models.Model):
     def call(self, inputs, training=None, mask=None):
         # x_en: (batch_size, in_seq_len, embed_dim)
         # x_de: (batch_size, 1, embed_dim)
-        x_en, tk, out_seq_len = inputs
+        x_en, out_seq_len = inputs
         batch_size = x_en.shape[0]
-        x_de = tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
+        x_de = tf.constant([[self.strt_token_id]] * batch_size, dtype=tf.float32)
         x_de = self.notes_emb(x_de)
         for i in range(out_seq_len):
             mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
@@ -235,7 +168,7 @@ class NotesExtend(tf.keras.models.Model):
             self.cp_notes_extend, notes_extend_path, max_to_keep=max_to_keep)
         if self.cp_manager_notes_extend.latest_checkpoint:
             self.cp_notes_extend.restore(self.cp_manager_notes_extend.latest_checkpoint)
-            print('Restored the latest notes_extend')
+            print('Restored the latest notes_extender')
 
     def train_step(self, inputs):
         # x_in: numpy 3d array (batch, in_seq_len, 4):
@@ -243,7 +176,7 @@ class NotesExtend(tf.keras.models.Model):
         # x_tar_out: numpy 3d array (batch, out_seq_len, 4)
         #   columns: notes_id (int), velocity, time_passed_since_last_note, notes_duration
         x_in, x_tar_in, x_tar_out = inputs
-        
+
         with tf.GradientTape() as tape:
             mask_padding = None  # util.padding_mask(x_in[:, :, 0])  # (batch, 1, 1, in_seq_len)
             mask_lookahead = util.lookahead_mask(x_tar_in.shape[1])  # (out_seq_len, out_seq_len)
@@ -268,7 +201,8 @@ class NotesExtend(tf.keras.models.Model):
             return loss_notes
 
     def train(self, dataset, epochs=10, save_model_step=1, notes_emb_path=notes_emb_path,
-              notes_extend_path=notes_extend_path, max_to_keep=5, print_batch=True, print_batch_step=10, print_epoch=True,
+              notes_extend_path=notes_extend_path, max_to_keep=5, print_batch=True, print_batch_step=10,
+              print_epoch=True,
               print_epoch_step=5, warmup_steps=4000,
               optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)):
         learning_rate = util.CustomSchedule(self.embed_dim, warmup_steps)
@@ -286,7 +220,7 @@ class NotesExtend(tf.keras.models.Model):
                 losses = self.train_step((x_in, x_tar_in, x_tar_out))
                 if print_batch:
                     if (i + 1) % print_batch_step == 0:
-                        print('Epoch {} Batch {}: loss={:.4f}'.format(epoch+1, i+1, losses.numpy()))
+                        print('Epoch {} Batch {}: loss={:.4f}'.format(epoch + 1, i + 1, losses.numpy()))
             if print_epoch:
                 if (epoch + 1) % print_epoch_step == 0:
                     print('Epoch {}: Loss = {:.4f}, Time used = {:.4f}'.format(
@@ -298,12 +232,65 @@ class NotesExtend(tf.keras.models.Model):
                 print('Saved the latest notes_extend')
 
 
+class ChordsSythesisBlock(tf.keras.models.Model):
+
+    def __init__(self, embed_dim=16, strt_token_id=15001, out_seq_len=4, kernel_size=3, out_notes_pool_size=15002,
+                 n_heads=4, max_pos=800, fc_activation="relu", encoder_layers=5, decoder_layers=5, fc_layers=3,
+                 norm_epsilon=1e-6, embedding_dropout_rate=0.2, transformer_dropout_rate=0.2,
+                 activ=tf.keras.layers.LeakyReLU(alpha=0.1)):
+        # generate latent vector of dimension; (batch, in_seq_len, in_features)
+        # input: tf.keras.layers.Input(shape=(in_dim, 1))
+        # example: input random time vector (batch, 16, 1) ==> output latent vector (batch, 16, 3)
+        #          input random notes vector (batch, 16, 1) ==> output latent vector (batch, 16, 16)
+        super(ChordsSythesisBlock, self).__init__()
+        assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
+
+        self.out_seq_len = out_seq_len
+        self.strt_token_id = strt_token_id
+        self.activ = activ
+        self.g_fcs = [tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='zeros')
+                      for _ in range(2)]
+        self.b_fcs = [tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='ones')
+                      for _ in range(2)]
+        self.n_cv1s = [tf.keras.layers.Conv1D(
+            out_seq_len, kernel_size=kernel_size, padding='same', kernel_initializer='zeros', bias_initializer='zeros')
+            for _ in range(2)]
+        self.up_trs = [NotesExtend(
+            strt_token_id=strt_token_id, out_notes_pool_size=out_notes_pool_size, embed_dim=embed_dim,
+            n_heads=n_heads, max_pos=max_pos, fc_activation=fc_activation, encoder_layers=encoder_layers,
+            decoder_layers=decoder_layers, fc_layers=fc_layers, norm_epsilon=norm_epsilon,
+            embedding_dropout_rate=embedding_dropout_rate, transformer_dropout_rate=transformer_dropout_rate)
+            for _ in range(2)]
+
+    def call(self, inputs, training=None, mask=None):
+        # conv_in: (batch, updated strt_dim, embed_dim)
+        # style_in: (batch, style_dim, 1)
+        # noise: (embed_dim, 1)
+        conv_in, style_in, noise = inputs
+
+        b = self.b_fcs[0](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
+        g = self.g_fcs[0](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
+        n = tf.transpose(self.n_cv1s[0](noise), perm=(0, 2, 1))  # (batch, out_seq_len, embed_dim)
+        out = self.up_trs[0]((conv_in, self.out_seq_len))  # (batch, out_seq_len, embed_dim)
+        out = tf.add(out, n)  # (batch, out_seq_len, embed_dim)
+        out = AdaInstanceNormalization()([out, b, g])  # (batch, out_seq_len, embed_dim)
+        out = self.activ(out)  # (batch, out_seq_len, embed_dim)
+
+        b2 = self.b_fcs[1](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
+        g2 = self.g_fcs[1](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
+        n2 = tf.transpose(self.n_cv1s[1](noise), perm=(0, 2, 1))  # (batch, out_seq_len, embed_dim)
+        out = self.up_trs[1]((out, self.out_seq_len))  # (batch, out_seq_len, embed_dim)
+        out = tf.add(out, n2)  # (batch, out_seq_len, embed_dim)
+        out = AdaInstanceNormalization()([out, b2, g2])  # (batch, out_seq_len, embed_dim)
+        out = self.activ(out)  # (batch, out_seq_len, embed_dim)
+
+        return out
+
+
 class TimeExtend(tf.keras.models.Model):
 
     def __init__(self, time_features=3, fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3,
                  norm_epsilon=1e-6, transformer_dropout_rate=0.2):
-        
-        # todo: add noise
         super(TimeExtend, self).__init__()
         self.time_features = time_features
         # 3 for [velocity, velocity, time since last start, notes duration]
@@ -406,4 +393,56 @@ class TimeExtend(tf.keras.models.Model):
             if (epoch + 1) % save_model_step == 0:
                 self.cp_manager_time_extend.save()
                 print('Saved the latest time_extend')
+
+
+class TimeSythesisBlock(tf.keras.models.Model):
+
+    def __init__(self, out_seq_len=4, kernel_size=3, time_features=3, fc_activation="relu",
+                 encoder_layers=5, decoder_layers=5, fc_layers=3, norm_epsilon=1e-6, transformer_dropout_rate=0.2,
+                 activ=tf.keras.layers.LeakyReLU(alpha=0.1)):
+        # generate latent vector of dimension; (batch, in_seq_len, in_features)
+        # input: tf.keras.layers.Input(shape=(in_dim, 1))
+        # example: input random time vector (batch, 16, 1) ==> output latent vector (batch, 16, 3)
+        #          input random notes vector (batch, 16, 1) ==> output latent vector (batch, 16, 16)
+        super(TimeSythesisBlock, self).__init__()
+        self.out_seq_len = out_seq_len
+        self.activ = activ
+        self.g_fcs = [tf.keras.layers.Dense(time_features, kernel_initializer='he_normal', bias_initializer='zeros')
+                      for _ in range(2)]
+        self.b_fcs = [tf.keras.layers.Dense(time_features, kernel_initializer='he_normal', bias_initializer='ones')
+                      for _ in range(2)]
+        self.n_cv1s = [tf.keras.layers.Conv1D(
+            out_seq_len, kernel_size=kernel_size, padding='same', kernel_initializer='zeros', bias_initializer='zeros')
+            for _ in range(2)]
+        self.up_trs = [TimeExtend(
+            time_features=time_features, fc_activation=fc_activation, encoder_layers=encoder_layers,
+            decoder_layers=decoder_layers, fc_layers=fc_layers, norm_epsilon=norm_epsilon,
+            transformer_dropout_rate=transformer_dropout_rate)
+            for _ in range(2)]
+
+    def call(self, inputs, training=None, mask=None):
+        # conv_in: (batch, updated strt_dim, time_features)
+        # style_in: (batch, style_dim, 1)
+        # noise: (time_features, 1)
+        conv_in, style_in, noise = inputs
+
+        b = self.b_fcs[0](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
+        g = self.g_fcs[0](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
+        n = tf.transpose(self.n_cv1s[0](noise), perm=(0, 2, 1))  # (batch, out_seq_len, time_features)
+        out = self.up_trs[0]((conv_in, self.out_seq_len))  # (batch, out_seq_len, time_features)
+        out = tf.add(out, n)  # (batch, out_seq_len, time_features)
+        out = AdaInstanceNormalization()([out, b, g])  # (batch, out_seq_len, time_features)
+        out = self.activ(out)  # (batch, out_seq_len, time_features)
+
+        b2 = self.b_fcs[1](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
+        g2 = self.g_fcs[1](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
+        n2 = tf.transpose(self.n_cv1s[1](noise), perm=(0, 2, 1))  # (batch, out_seq_len, time_features)
+        out = self.up_trs[1]((out, self.out_seq_len))  # (batch, out_seq_len, time_features)
+        out = tf.add(out, n2)  # (batch, out_seq_len, time_features)
+        out = AdaInstanceNormalization()([out, b2, g2])  # (batch, out_seq_len, time_features)
+        out = self.activ(out)  # (batch, out_seq_len, time_features)
+
+        return out
+
+
 
