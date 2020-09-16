@@ -26,7 +26,7 @@ print(notes_pool_size)
 in_seq_len, out_seq_len = 16, 64  # 64
 
 dataset = util.load_true_data_pretrain_gen(
-    tk, in_seq_len, out_seq_len, step=40, batch_size=50,
+    tk, in_seq_len, out_seq_len, step=20, batch_size=50,
     vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
     pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
 
@@ -34,7 +34,7 @@ notes_ext = generator.NotesExtend(
     out_notes_pool_size=15002, embed_dim=16, n_heads=4, max_pos=800, fc_activation="relu", encoder_layers=2,
     decoder_layers=2, fc_layers=3, norm_epsilon=1e-6, embedding_dropout_rate=0.2, transformer_dropout_rate=0.2)
 
-notes_ext.train(dataset, epochs=20, save_model_step=1,
+notes_ext.train(dataset, epochs=40, save_model_step=1,
                 notes_emb_path=notes_emb_path, notes_extend_path=notes_extend_path,
                 max_to_keep=5, print_batch=True, print_batch_step=100, print_epoch=True, print_epoch_step=1,
                 warmup_steps=4000,

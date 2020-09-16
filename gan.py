@@ -36,7 +36,6 @@ dur_norm = 1.3
 # Todo: update tf.variable during training????????
 
 
-
 class GAN(tf.keras.Model):
 
     def __init__(self, in_seq_len=16, out_seq_len=64, in_dim=256, strt_dim=2,
@@ -73,6 +72,7 @@ class GAN(tf.keras.Model):
 
         # ---------------------------------- layers ----------------------------------
         # latent vector generator
+        # todo: change!!!!!
         self.notes_latent = generator.Latent(
             out_dim=in_seq_len, fc_layers=ltnt_fc_layers,
             knl_size=ltnt_knl, fltr_size=embed_dim, activ=ltnt_fc_activation)
