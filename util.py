@@ -9,8 +9,8 @@ tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
-def latant_vector(n_samples, dim1, dim2, mean_=1.0, std_=0.5):
-    return np.random.normal(mean_, std_, size=[n_samples, dim1, dim2])
+# def latant_vector(n_samples, dim1, dim2, mean_=1.0, std_=0.5):
+#     return np.random.normal(mean_, std_, size=[n_samples, dim1, dim2])
 
 
 def padding_mask(x_):
@@ -30,8 +30,8 @@ def softargmax(x, beta=1e10):
 
 
 def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
-    # x: (batch, length, 4); 4 columns: [notes in text format, velocity, time since last start, notes duration]
-    # ------------- encode notes from text to integer --------------
+    # x: (batch, length, 4); 4 columns: [chords in text format, velocity, time since last start, chords duration]
+    # ------------- encode chords from text to integer --------------
     x_0 = tk.texts_to_sequences(x[:, :, 0].tolist())
     return np.append(np.expand_dims(x_0, axis=-1) - 1,  # ..- 1 because tk index starts from 1
                      np.divide(x[:, :, 1:], np.array([vel_norm, tmps_norm, dur_norm])), axis=-1).astype(np.float32)
@@ -40,7 +40,7 @@ def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
 def load_true_data_pretrain_gen(
         tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
         pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
-    # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
+    # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_dict_final.pkl'
     # tk = pkl.load(open(tk_path, 'rb'))
     x_in, x_tar = preprocess.DataPreparation.batch_preprocessing_pretrain_gen(
         in_seq_len, out_seq_len-1, step, pths, name_substr_list)
@@ -61,7 +61,7 @@ def load_true_data_pretrain_gen(
 def load_true_data_gan(
         tk, seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
         pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
-    # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_dict_final.pkl'
+    # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_dict_final.pkl'
     # tk = pkl.load(open(tk_path, 'rb'))
     x_in = preprocess.DataPreparation.batch_preprocessing_gan(
         seq_len, step=step, pths=pths, name_substr_list=name_substr_list)  # (batch, seq_len, 4)
@@ -73,7 +73,7 @@ def load_true_data_gan(
 
 """
 import pickle as pkl
-tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_final.pkl'
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_final.pkl'
 tk = pkl.load(open(tk_path, 'rb'))
 
 in_seq_len, out_seq_len = 16, 64
@@ -102,7 +102,7 @@ class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
 
 
 @tf.function
-def loss_func_notes(real, pred):
+def loss_func_chords(real, pred):
     cross_entropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
     mask = tf.math.logical_not(tf.math.equal(real, 0))
     mask = tf.cast(mask, dtype=tf.float32)
