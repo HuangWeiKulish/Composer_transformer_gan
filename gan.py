@@ -31,14 +31,14 @@ vel_norm = 64.0
 tmps_norm = 0.12
 dur_norm = 1.3
 
-# tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_final.pkl'
+# tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/notes_dict_final.pkl'
 # tk = pkl.load(open(tk_path, 'rb'))
 
 
 class GAN(tf.keras.models.Model):
 
-    def __init__(self, out_seq_len_list=(4, 8, 16, 64), embed_dim=16, time_features=3, in_dim=512, n_heads=4,
-                 strt_token_id=15001, chords_pool_size=15002, chords_max_pos=800,
+    def __init__(self, out_seq_len_list=(8, 16, 32, 64), embed_dim=16, time_features=3, in_dim=512, n_heads=4,
+                 strt_dim=4, strt_token_id=15001, chords_pool_size=15002, chords_max_pos=800,
                  chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                  tmstl_fc_layers=4, tmstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                  chsyn_kernel_size=3, chsyn_fc_activation="relu",
@@ -50,29 +50,21 @@ class GAN(tf.keras.models.Model):
                  tmsyn_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                  d_kernel_size=3, d_encoder_layers=1, d_decoder_layers=1, d_fc_layers=3, d_norm_epsilon=1e-6,
                  d_transformer_dropout_rate=0.2, d_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
-                 mode_='both'):
+                 d_out_dropout=0.3, mode_='both'):
         super(GAN, self).__init__()
         if mode_ in ['chords', 'both']:
             assert embed_dim % n_heads == 0, 'make sure: embed_dim % chsyn_n_heads == 0'
 
         # ---------------------------------- settings ----------------------------------
         self.mode_ = mode_
-        # self.in_seq_len = in_seq_len
-        # self.out_seq_len = out_seq_len
-        # self.in_dim = in_dim
-        # self.strt_dim = strt_dim
-        # self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
-        # self.mode_ = mode_  # only choose from ['chords', 'time', 'both']
-        # self.embed_dim = embed_dim
-        # 
-        # self.optimizer_disc = None
-        # self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
-        # self.optimizer_gen = None
-        # self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
+        self.out_seq_len_list = out_seq_len_list
+        self.in_dim = in_dim
+        self.strt_dim = strt_dim
+        self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
 
         # ----------------------------- constant layer -----------------------------
         # const: (1, strt_dim, in_dim)
-        self.const = tf.Variable(np.ones((1, out_seq_len_list[0], in_dim)), dtype=tf.float32)
+        self.const = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32)
 
         # ---------------------------------- layers ----------------------------------
         # latent vector generator
@@ -103,18 +95,21 @@ class GAN(tf.keras.models.Model):
             self.disc = discriminator.ChordsDiscriminator(
                 embed_dim=embed_dim, n_heads=n_heads, fc_activation=d_fc_activation,
                 encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
-                norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate)
+                norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate,
+                pre_out_dim=in_dim, out_dropout=d_out_dropout)
         elif self.mode_ == 'time':
             self.disc = discriminator.TimeDiscriminator(
                 time_features=time_features, fc_activation=d_fc_activation,
                 encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
-                norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate)
+                norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate,
+                pre_out_dim=in_dim, out_dropout=d_out_dropout)
         else:  # self.mode_ == 'both'
             self.disc = discriminator.Discriminator(
                 embed_dim=embed_dim, n_heads=n_heads, kernel_size=d_kernel_size,
                 fc_activation=d_fc_activation, encoder_layers=d_encoder_layers,
                 decoder_layers=d_decoder_layers, fc_layers=d_fc_layers, norm_epsilon=d_norm_epsilon,
-                transformer_dropout_rate=d_transformer_dropout_rate)
+                transformer_dropout_rate=d_transformer_dropout_rate,
+                pre_out_dim=in_dim, out_dropout=d_out_dropout)
 
     def load_true_samples(self, tk, step=30, batch_size=10, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
                           pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
@@ -124,15 +119,17 @@ class GAN(tf.keras.models.Model):
         self.batch_size = batch_size
         self.tk = tk
         self.true_data = util.load_true_data_gan(
-            tk, self.out_seq_len, step=step, batch_size=batch_size, vel_norm=vel_norm,
+            tk, self.out_seq_len_list[-1], step=step, batch_size=batch_size, vel_norm=vel_norm,
             tmps_norm=tmps_norm, dur_norm=dur_norm, pths=pths, name_substr_list=name_substr_list)
 
     def load_model(self, const_path=const_path, chords_style_path=chords_style_path, time_style_path=time_style_path,
-                   chords_emb_path=chords_emb_path, chords_extend_path=chords_extend_path, time_extend_path=time_extend_path,
-                   chords_disc_path=chords_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+                   chords_emb_path=chords_emb_path, chords_extend_path=chords_extend_path,
+                   time_extend_path=time_extend_path, chords_disc_path=chords_disc_path,
+                   time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
                    train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
                    train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5,
                    load_disc=False):
+        # todo: load according to out_seq_len_list
         try:
             # const: (1, strt_dim, in_dim)
             self.const = pkl.load(open(os.path.join(const_path, 'constant.pkl'), 'rb'))  # numpy array
@@ -216,6 +213,32 @@ class GAN(tf.keras.models.Model):
         if train_disc:
             util.model_trainable(self.disc, trainable=train_disc)
 
+    def save_models(self, const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt, save_time_extend,
+                    load_disc, save_disc):
+        # todo: load according to out_seq_len_list
+        pkl.dump(self.const.numpy(), open(os.path.join(const_path, 'constant.pkl'), 'wb'))
+
+        if self.mode_ in ['chords', 'both']:
+            if save_chords_ltnt:
+                self.cp_manager_chords_ltnt.save()
+                print('Saved the latest chords_ltnt')
+            if save_chords_emb:
+                self.cp_manager_chords_emb.save()
+                print('Saved the latest chords_emb')
+            if save_chords_extend:
+                self.cp_manager_chords_extend.save()
+                print('Saved the latest chords_extend')
+        if self.mode_ in ['time', 'both']:
+            if save_time_ltnt:
+                self.cp_manager_time_ltnt.save()
+                print('Saved the latest time_ltnt')
+            if save_time_extend:
+                self.cp_manager_time_extend.save()
+                print('Saved the latest time_extend')
+        if load_disc and save_disc:
+            self.cp_manager_disc.save()
+            print('Saved the latest discriminator for {}'.format(self.mode_))
+
     def train_discriminator(self, nt_ltnt, tm_ltnt, nts_tr, tms_tr, fake_mode=True):
         # nt_ltnt: (batch, in_dim, 1) np.array or None
         # tm_ltnt: (batch, in_dim, 1) np.array or None
@@ -295,31 +318,6 @@ class GAN(tf.keras.models.Model):
         loss_gen = tf.keras.losses.binary_crossentropy(lbls, pred_fk, from_logits=False, label_smoothing=0)
         return loss_gen, vbs
 
-    def save_models(self, const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt, save_time_extend,
-                    load_disc, save_disc):
-        pkl.dump(self.const.numpy(), open(os.path.join(const_path, 'constant.pkl'), 'wb'))
-
-        if self.mode_ in ['chords', 'both']:
-            if save_chords_ltnt:
-                self.cp_manager_chords_ltnt.save()
-                print('Saved the latest chords_ltnt')
-            if save_chords_emb:
-                self.cp_manager_chords_emb.save()
-                print('Saved the latest chords_emb')
-            if save_chords_extend:
-                self.cp_manager_chords_extend.save()
-                print('Saved the latest chords_extend')
-        if self.mode_ in ['time', 'both']:
-            if save_time_ltnt:
-                self.cp_manager_time_ltnt.save()
-                print('Saved the latest time_ltnt')
-            if save_time_extend:
-                self.cp_manager_time_extend.save()
-                print('Saved the latest time_extend')
-        if load_disc and save_disc:
-            self.cp_manager_disc.save()
-            print('Saved the latest discriminator for {}'.format(self.mode_))
-
     def train_step(self, nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr):
         # nt_ltnt: chords random vector (batch, out_seq_len, 16)
         # tm_ltnt: time random vector (batch, out_seq_len, 1)
@@ -366,7 +364,8 @@ class GAN(tf.keras.models.Model):
               save_chords_ltnt=True, save_time_ltnt=True, save_chords_emb=True,
               save_chords_extend=True, save_time_extend=True, save_disc=True,
               max_to_keep=5, load_disc=False,
-              nt_ltnt_uniform=True, tm_ltnt_uniform=False, true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1)):
+              nt_ltnt_uniform=True, tm_ltnt_uniform=False, true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1),
+              recycle=True):
 
         log_current = {'epochs': 1, 'mode': self.mode_}
         try:
@@ -377,10 +376,8 @@ class GAN(tf.keras.models.Model):
         last_ep = log_current['epochs'] + 1
 
         lr_gen = util.CustomSchedule(self.embed_dim, warmup_steps) if gen_lr is not None else gen_lr
-        #lr_disc = util.CustomSchedule(self.embed_dim, warmup_steps)
         self.optimizer_gen = optmzr(lr_gen) if self.mode_ == 'time' else optmzr(lr_gen)
         self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
-        #self.optimizer_disc = optmzr(lr_disc)
         self.optimizer_disc = optmzr(disc_lr)
         self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
 
@@ -417,29 +414,21 @@ class GAN(tf.keras.models.Model):
                     # the last batch generated may be smaller, so go to next round
                     # the unselected samples may be selected next time because data will be shuffled
                     continue
-
                 # true samples ---------------------------
-                # nts_tr: (batch, in_seq_len)
-                # tms_tr: (batch, in_seq_len, 3)
+                # nts_tr: (batch, seq_len)
+                # tms_tr: (batch, seq_len, 3)
                 nts_tr, tms_tr = true_samples[:, :, 0], true_samples[:, :, 1:]
                 # random vectors ---------------------------
+                # todo: recycle!!!
                 # nt_ltnt: (batch, in_dim, 1)
-                nt_ltnt = tf.constant(
-                    np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.nt_ltnt_uniform \
-                    else util.latant_vector(self.batch_size, self.in_dim, 1, mean_=0, std_=1.5), dtype=tf.float32)
+                nt_ltnt = tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
                 # tm_ltnt: (batch, in_dim, 1)
-                tm_ltnt = tf.constant(
-                    np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.tm_ltnt_uniform \
-                    else util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0, std_=1.5), dtype=tf.float32)
+                tm_ltnt = tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
 
                 # nt_ltnt2: (batch * 2, in_dim, 1)
-                nt_ltnt2 = tf.constant(
-                    np.random.uniform(-1.5, 1.5, (self.batch_size * 2, self.in_dim, 1)) if self.nt_ltnt_uniform \
-                    else util.latant_vector(self.batch_size * 2, self.in_dim, 1, mean_=0, std_=1.5), dtype=tf.float32)
+                nt_ltnt2 = tf.random.normal((self.batch_size * 2, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
                 # tm_ltnt2: (batch * 2, in_dim, 1)
-                tm_ltnt2 = tf.constant(
-                    np.random.uniform(-1.5, 1.5, (self.batch_size * 2, self.in_dim, 1)) if self.tm_ltnt_uniform \
-                    else util.latant_vector(self.batch_size * 2, self.in_dim, 1, mean_=0, std_=1.5), dtype=tf.float32)
+                tm_ltnt2 = tf.random.normal((self.batch_size * 2, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
 
                 loss_disc_tr, loss_disc_fk, loss_gen = self.train_step(
                     nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr)
@@ -514,17 +503,23 @@ class GAN(tf.keras.models.Model):
         return mid
 
 
-# Todo: modify discriminator, separate last layer from features layer ==> minimize distance of feature from discriminator to latent features
-# Todo: use minibatch Minibatch discrimination (https://towardsdatascience.com/gan-ways-to-improve-gan-performance-acf37f9f59b)
 
+
+# Todo: modify discriminator, get preout
+
+
+# Todo: use minibatch Minibatch discrimination (https://towardsdatascience.com/gan-ways-to-improve-gan-performance-acf37f9f59b)
 # Todo: use tanh at the last layer of generator
 # Todo: schedule training like: if disc_loss > gen_loss ==> train gen, else train disc
 # Todo: use different loss function max(logD)
 # try recycle gan
 
 """
-out_seq_len_list=(4, 8, 16, 64)
+out_seq_len_list=(8, 16, 32, 64)
 embed_dim=16
+in_dim=512
+time_features=3
+strt_dim=4
 strt_token_id=15001
 chords_pool_size=15002
 chords_max_pos=800
