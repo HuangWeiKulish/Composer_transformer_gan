@@ -14,14 +14,14 @@ import preprocess
 
 const_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/constant'
 
-notes_latent_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_latent'
-time_latent_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_latent'
+chords_style_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_style'
+time_style_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_style'
 
-notes_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_embedder'
-notes_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_extend'
+chords_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_embedder'
+chords_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_extender'
 time_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_extender'
 
-notes_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_discriminator'
+chords_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_discriminator'
 time_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_discriminator'
 combine_disc_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/discriminator'
 
@@ -31,84 +31,88 @@ vel_norm = 64.0
 tmps_norm = 0.12
 dur_norm = 1.3
 
-# tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/notes_indexcer/notes_dict_final.pkl'
+# tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_final.pkl'
 # tk = pkl.load(open(tk_path, 'rb'))
-# Todo: update tf.variable during training????????
 
 
-class GAN(tf.keras.Model):
+class GAN(tf.keras.models.Model):
 
-    def __init__(self, in_seq_len=16, out_seq_len=64, in_dim=256, strt_dim=2,
-                 ltnt_knl=5, ltnt_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1), ltnt_fc_layers=4,
-                 strt_token_id=15001, out_notes_pool_size=15002, embed_dim=16,
-                 n_heads=4, max_pos=800, time_features=3, fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
-                 g_encoder_layers=32, g_decoder_layers=2, g_fc_layers=3, g_norm_epsilon=1e-6,
-                 g_embedding_dropout_rate=0.2, g_transformer_dropout_rate=0.2,
+    def __init__(self, out_seq_len_list=(4, 8, 16, 64), embed_dim=16, time_features=3, in_dim=512, n_heads=4,
+                 strt_token_id=15001, chords_pool_size=15002, chords_max_pos=800,
+                 chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
+                 tmstl_fc_layers=4, tmstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
+                 chsyn_kernel_size=3, chsyn_fc_activation="relu",
+                 chsyn_encoder_layers=3, chsyn_decoder_layers=3, chsyn_fc_layers=3,
+                 chsyn_norm_epsilon=1e-6, chsyn_embedding_dropout_rate=0.2, chsyn_transformer_dropout_rate=0.2,
+                 chsyn_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
+                 tmsyn_kernel_size=3, tmsyn_fc_activation="relu", tmsyn_encoder_layers=3, tmsyn_decoder_layers=3,
+                 tmsyn_fc_layers=3, tmsyn_norm_epsilon=1e-6, tmsyn_transformer_dropout_rate=0.2,
+                 tmsyn_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                  d_kernel_size=3, d_encoder_layers=1, d_decoder_layers=1, d_fc_layers=3, d_norm_epsilon=1e-6,
-                 d_transformer_dropout_rate=0.2,
+                 d_transformer_dropout_rate=0.2, d_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
                  mode_='both'):
         super(GAN, self).__init__()
-        assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
+        if mode_ in ['chords', 'both']:
+            assert embed_dim % n_heads == 0, 'make sure: embed_dim % chsyn_n_heads == 0'
 
         # ---------------------------------- settings ----------------------------------
-        self.batch_size = None
-        self.true_data = None
-        self.in_seq_len = in_seq_len
-        self.out_seq_len = out_seq_len
-        self.in_dim = in_dim
-        self.strt_dim = strt_dim
-        self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
-        self.mode_ = mode_  # only choose from ['notes', 'time', 'both']
-        self.embed_dim = embed_dim
-
-        self.optimizer_disc = None
-        self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
-        self.optimizer_gen = None
-        self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
+        self.mode_ = mode_
+        # self.in_seq_len = in_seq_len
+        # self.out_seq_len = out_seq_len
+        # self.in_dim = in_dim
+        # self.strt_dim = strt_dim
+        # self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
+        # self.mode_ = mode_  # only choose from ['chords', 'time', 'both']
+        # self.embed_dim = embed_dim
+        # 
+        # self.optimizer_disc = None
+        # self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
+        # self.optimizer_gen = None
+        # self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
 
         # ----------------------------- constant layer -----------------------------
         # const: (1, strt_dim, in_dim)
-        self.const = tf.Variable(np.ones((1, self.strt_dim, self.in_dim)), dtype=tf.float32)
+        self.const = tf.Variable(np.ones((1, out_seq_len_list[0], in_dim)), dtype=tf.float32)
 
         # ---------------------------------- layers ----------------------------------
         # latent vector generator
-        # todo: change!!!!!
-        self.notes_latent = generator.Latent(
-            out_dim=in_seq_len, fc_layers=ltnt_fc_layers,
-            knl_size=ltnt_knl, fltr_size=embed_dim, activ=ltnt_fc_activation)
-        self.time_latent = generator.Latent(
-            out_dim=in_seq_len, fc_layers=ltnt_fc_layers,
-            knl_size=ltnt_knl, fltr_size=time_features, activ=ltnt_fc_activation)
+        self.chords_style = generator.Mapping(fc_layers=chstl_fc_layers, activ=chstl_activ)
+        self.time_style = generator.Mapping(fc_layers=tmstl_fc_layers, activ=tmstl_activ)
 
-        # notes generator
-        self.notes_extend = generator.NotesExtend(
-            out_notes_pool_size=out_notes_pool_size, embed_dim=embed_dim, n_heads=n_heads, max_pos=max_pos,
-            fc_activation=fc_activation, encoder_layers=g_encoder_layers, decoder_layers=g_decoder_layers,
-            fc_layers=g_fc_layers, norm_epsilon=g_norm_epsilon, embedding_dropout_rate=g_embedding_dropout_rate,
-            transformer_dropout_rate=g_transformer_dropout_rate)
+        # chords generator
+        self.chords_syn = [generator.ChordsSythesisBlock(
+            embed_dim=embed_dim, strt_token_id=strt_token_id, out_seq_len=sql, kernel_size=chsyn_kernel_size,
+            out_chords_pool_size=chords_pool_size, n_heads=n_heads, max_pos=chords_max_pos,
+            fc_activation=chsyn_fc_activation, encoder_layers=chsyn_encoder_layers,
+            decoder_layers=chsyn_decoder_layers, fc_layers=chsyn_fc_layers, norm_epsilon=chsyn_norm_epsilon,
+            embedding_dropout_rate=chsyn_embedding_dropout_rate,
+            transformer_dropout_rate=chsyn_transformer_dropout_rate, activ=chsyn_activ) for sql in out_seq_len_list] \
+            if mode_ in ['chords', 'both'] else None
 
         # time generator
-        # 3 for [velocity, velocity, time since last start, notes duration]
-        self.time_extend = generator.TimeExtend(
-            time_features=time_features, fc_activation=fc_activation, encoder_layers=g_encoder_layers,
-            decoder_layers=g_decoder_layers, fc_layers=g_fc_layers, norm_epsilon=g_norm_epsilon,
-            transformer_dropout_rate=g_transformer_dropout_rate)
+        # 3 for [velocity, velocity, time since last start, chords duration]
+        self.time_syn = [generator.TimeSythesisBlock(
+            out_seq_len=sql, kernel_size=tmsyn_kernel_size, time_features=time_features,
+            fc_activation=tmsyn_fc_activation, encoder_layers=tmsyn_encoder_layers, decoder_layers=tmsyn_decoder_layers,
+            fc_layers=tmsyn_fc_layers, norm_epsilon=tmsyn_norm_epsilon,
+            transformer_dropout_rate=tmsyn_transformer_dropout_rate, activ=tmsyn_activ) for sql in out_seq_len_list] \
+            if mode_ in ['time', 'both'] else None
 
         # discriminator
-        if self.mode_ == 'notes':
-            self.disc = discriminator.NotesDiscriminator(
-                embed_dim=embed_dim, n_heads=n_heads, fc_activation=fc_activation,
+        if self.mode_ == 'chords':
+            self.disc = discriminator.ChordsDiscriminator(
+                embed_dim=embed_dim, n_heads=n_heads, fc_activation=d_fc_activation,
                 encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
                 norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate)
         elif self.mode_ == 'time':
             self.disc = discriminator.TimeDiscriminator(
-                time_features=time_features, fc_activation=fc_activation,
+                time_features=time_features, fc_activation=d_fc_activation,
                 encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers, fc_layers=d_fc_layers,
                 norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate)
         else:  # self.mode_ == 'both'
             self.disc = discriminator.Discriminator(
                 embed_dim=embed_dim, n_heads=n_heads, kernel_size=d_kernel_size,
-                fc_activation=fc_activation, encoder_layers=d_encoder_layers,
+                fc_activation=d_fc_activation, encoder_layers=d_encoder_layers,
                 decoder_layers=d_decoder_layers, fc_layers=d_fc_layers, norm_epsilon=d_norm_epsilon,
                 transformer_dropout_rate=d_transformer_dropout_rate)
 
@@ -123,9 +127,9 @@ class GAN(tf.keras.Model):
             tk, self.out_seq_len, step=step, batch_size=batch_size, vel_norm=vel_norm,
             tmps_norm=tmps_norm, dur_norm=dur_norm, pths=pths, name_substr_list=name_substr_list)
 
-    def load_model(self, const_path=const_path, notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
-                   notes_emb_path=notes_emb_path, notes_extend_path=notes_extend_path, time_extend_path=time_extend_path,
-                   notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+    def load_model(self, const_path=const_path, chords_style_path=chords_style_path, time_style_path=time_style_path,
+                   chords_emb_path=chords_emb_path, chords_extend_path=chords_extend_path, time_extend_path=time_extend_path,
+                   chords_disc_path=chords_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
                    train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
                    train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5,
                    load_disc=False):
@@ -139,34 +143,34 @@ class GAN(tf.keras.Model):
 
         # ---------------------- call back setting --------------------------
         # load latent models
-        self.cp_notes_ltnt = tf.train.Checkpoint(model=self.notes_latent, optimizer=self.optimizer_gen)
-        self.cp_manager_notes_ltnt = tf.train.CheckpointManager(
-            self.cp_notes_ltnt, notes_latent_path, max_to_keep=max_to_keep)
-        if self.cp_manager_notes_ltnt.latest_checkpoint:
-            self.cp_notes_ltnt.restore(self.cp_manager_notes_ltnt.latest_checkpoint)
-            print('Restored the latest notes_ltnt')
+        self.cp_chords_ltnt = tf.train.Checkpoint(model=self.chords_style, optimizer=self.optimizer_gen)
+        self.cp_manager_chords_ltnt = tf.train.CheckpointManager(
+            self.cp_chords_ltnt, chords_style_path, max_to_keep=max_to_keep)
+        if self.cp_manager_chords_ltnt.latest_checkpoint:
+            self.cp_chords_ltnt.restore(self.cp_manager_chords_ltnt.latest_checkpoint)
+            print('Restored the latest chords_ltnt')
 
-        self.cp_time_ltnt = tf.train.Checkpoint(model=self.time_latent, optimizer=self.optimizer_gen)
+        self.cp_time_ltnt = tf.train.Checkpoint(model=self.time_style, optimizer=self.optimizer_gen)
         self.cp_manager_time_ltnt = tf.train.CheckpointManager(
-            self.cp_time_ltnt, time_latent_path, max_to_keep=max_to_keep)
+            self.cp_time_ltnt, time_style_path, max_to_keep=max_to_keep)
         if self.cp_manager_time_ltnt.latest_checkpoint:
             self.cp_time_ltnt.restore(self.cp_manager_time_ltnt.latest_checkpoint)
             print('Restored the latest time_ltnt')
 
         # load generators
-        self.cp_notes_emb = tf.train.Checkpoint(model=self.notes_extend.notes_emb, optimizer=self.optimizer_gen)
-        self.cp_manager_notes_emb = tf.train.CheckpointManager(
-            self.cp_notes_emb, notes_emb_path, max_to_keep=max_to_keep)
-        if self.cp_manager_notes_emb.latest_checkpoint:
-            self.cp_notes_emb.restore(self.cp_manager_notes_emb.latest_checkpoint)
-            print('Restored the latest notes_emb')
+        self.cp_chords_emb = tf.train.Checkpoint(model=self.chords_extend.chords_emb, optimizer=self.optimizer_gen)
+        self.cp_manager_chords_emb = tf.train.CheckpointManager(
+            self.cp_chords_emb, chords_emb_path, max_to_keep=max_to_keep)
+        if self.cp_manager_chords_emb.latest_checkpoint:
+            self.cp_chords_emb.restore(self.cp_manager_chords_emb.latest_checkpoint)
+            print('Restored the latest chords_emb')
 
-        self.cp_notes_extend = tf.train.Checkpoint(model=self.notes_extend.notes_extend, optimizer=self.optimizer_gen)
-        self.cp_manager_notes_extend = tf.train.CheckpointManager(
-            self.cp_notes_extend, notes_extend_path, max_to_keep=max_to_keep)
-        if self.cp_manager_notes_extend.latest_checkpoint:
-            self.cp_notes_extend.restore(self.cp_manager_notes_extend.latest_checkpoint)
-            print('Restored the latest notes_extend')
+        self.cp_chords_extend = tf.train.Checkpoint(model=self.chords_extend.chords_extend, optimizer=self.optimizer_gen)
+        self.cp_manager_chords_extend = tf.train.CheckpointManager(
+            self.cp_chords_extend, chords_extend_path, max_to_keep=max_to_keep)
+        if self.cp_manager_chords_extend.latest_checkpoint:
+            self.cp_chords_extend.restore(self.cp_manager_chords_extend.latest_checkpoint)
+            print('Restored the latest chords_extend')
 
         self.cp_time_extend = tf.train.Checkpoint(model=self.time_extend.time_extend, optimizer=self.optimizer_gen)
         self.cp_manager_time_extend = tf.train.CheckpointManager(
@@ -177,9 +181,9 @@ class GAN(tf.keras.Model):
 
         # load discriminator
         if load_disc:
-            if self.mode_ == 'notes':
-                disc_pth = notes_disc_path
-                str_ = 'Restored the latest notes_disc'
+            if self.mode_ == 'chords':
+                disc_pth = chords_disc_path
+                str_ = 'Restored the latest chords_disc'
             elif self.mode_ == 'time':
                 disc_pth = time_disc_path
                 str_ = 'Restored the latest time_disc'
@@ -200,13 +204,13 @@ class GAN(tf.keras.Model):
         self.train_tmgen = train_tmgen
         self.train_disc = train_disc
         if train_ntlatent:
-            util.model_trainable(self.notes_latent, trainable=train_ntlatent)
+            util.model_trainable(self.chords_style, trainable=train_ntlatent)
         if train_tmlatent:
-            util.model_trainable(self.time_latent, trainable=train_tmlatent)
-        if train_ntemb & (self.mode_ in ['notes', 'both']):
-            util.model_trainable(self.notes_extend.notes_emb, trainable=train_ntemb)
-        if train_ntgen & (self.mode_ in ['notes', 'both']):
-            util.model_trainable(self.notes_extend.notes_extend, trainable=train_ntgen)
+            util.model_trainable(self.time_style, trainable=train_tmlatent)
+        if train_ntemb & (self.mode_ in ['chords', 'both']):
+            util.model_trainable(self.chords_extend.chords_emb, trainable=train_ntemb)
+        if train_ntgen & (self.mode_ in ['chords', 'both']):
+            util.model_trainable(self.chords_extend.chords_extend, trainable=train_ntgen)
         if train_tmgen & (self.mode_ in ['time', 'both']):
             util.model_trainable(self.time_extend.time_extend, trainable=train_tmgen)
         if train_disc:
@@ -222,23 +226,23 @@ class GAN(tf.keras.Model):
             util.model_trainable(self.disc, trainable=True)
 
         # discriminator prediction
-        if self.mode_ == 'notes':
-            nts = self.notes_extend(self.notes_latent(nt_ltnt, self.const_tile), self.tk, self.out_seq_len)\
-                if fake_mode else self.notes_extend.notes_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
-            de_in = self.notes_extend.notes_emb(tf.constant(
+        if self.mode_ == 'chords':
+            nts = self.chords_extend(self.chords_style(nt_ltnt, self.const_tile), self.tk, self.out_seq_len)\
+                if fake_mode else self.chords_extend.chords_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
+            de_in = self.chords_extend.chords_emb(tf.constant(
                 [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
             pred = self.disc(nts, de_in)  # (batch, 1)
         elif self.mode_ == 'time':
-            tms = self.time_extend(self.time_latent(tm_ltnt, self.const_tile), self.tk, self.out_seq_len) \
+            tms = self.time_extend(self.time_style(tm_ltnt, self.const_tile), self.tk, self.out_seq_len) \
                 if fake_mode else tms_tr
             de_in = tf.constant([[[0] * 3]] * self.batch_size, dtype=tf.float32)  # (batch, 1, time_features)
             pred = self.disc(tms, de_in)  # (batch, 1)
         else:  # self.mode_ == 'both'
-            nts = self.notes_extend(self.notes_latent(nt_ltnt, self.const_tile), self.tk, self.out_seq_len) \
-                if fake_mode else self.notes_extend.notes_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
-            tms = self.time_extend(self.time_latent(tm_ltnt, self.const_tile), self.tk, self.out_seq_len) \
+            nts = self.chords_extend(self.chords_style(nt_ltnt, self.const_tile), self.tk, self.out_seq_len) \
+                if fake_mode else self.chords_extend.chords_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
+            tms = self.time_extend(self.time_style(tm_ltnt, self.const_tile), self.tk, self.out_seq_len) \
                 if fake_mode else tms_tr
-            de_in = self.notes_extend.notes_emb(tf.constant(
+            de_in = self.chords_extend.chords_emb(tf.constant(
                 [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
             pred = self.disc(nts, tms, de_in)  # (batch, 1)
 
@@ -261,29 +265,29 @@ class GAN(tf.keras.Model):
             util.model_trainable(self.disc, trainable=False)
 
         # discriminator prediction
-        if self.mode_ == 'notes':
-            nt_ltnt = self.notes_latent(nt_ltnt, self.const_tile)  # (batch * 2, strt_dim, fltr_size)
-            nts_fk = self.notes_extend(nt_ltnt, self.tk, self.out_seq_len)  # (batch * 2, out_seq_len, embed_dim)
-            de_in = self.notes_extend.notes_emb(tf.constant(
+        if self.mode_ == 'chords':
+            nt_ltnt = self.chords_style(nt_ltnt, self.const_tile)  # (batch * 2, strt_dim, fltr_size)
+            nts_fk = self.chords_extend(nt_ltnt, self.tk, self.out_seq_len)  # (batch * 2, out_seq_len, embed_dim)
+            de_in = self.chords_extend.chords_emb(tf.constant(
                 [[self.strt_token_id]] * (self.batch_size * 2), dtype=tf.float32))  # (batch * 2, 1, embed_dim)
             pred_fk = self.disc(nts_fk, de_in)  # (batch, 1)
-            vbs = self.notes_latent.trainable_variables + self.notes_extend.trainable_variables
+            vbs = self.chords_style.trainable_variables + self.chords_extend.trainable_variables
         elif self.mode_ == 'time':
-            tm_ltnt = self.time_latent(tm_ltnt, self.const_tile)  # (batch * 2, strt_dim, fltr_size)
+            tm_ltnt = self.time_style(tm_ltnt, self.const_tile)  # (batch * 2, strt_dim, fltr_size)
             tms_fk = self.time_extend(tm_ltnt, self.tk, self.out_seq_len)  # (batch * 2, out_seq_len, time_features)
             de_in = tf.constant([[[0] * 3]] * (self.batch_size * 2), dtype=tf.float32)  # (batch * 2, 1, time_features)
             pred_fk = self.disc(tms_fk, de_in)  # (batch * 2, 1)
-            vbs = self.time_latent.trainable_variables + self.time_extend.trainable_variables
+            vbs = self.time_style.trainable_variables + self.time_extend.trainable_variables
         else:  # self.mode_ == 'both'
-            nt_ltnt = self.notes_latent(nt_ltnt, self.const_tile)  # (batch * 2, strt_dim, fltr_size)
-            nts_fk = self.notes_extend(nt_ltnt, self.tk, self.out_seq_len)  # (batch * 2, out_seq_len, embed_dim)
-            tm_ltnt = self.time_latent(tm_ltnt, self.const_tile)  # (batch * 2, strt_dim, fltr_size)
+            nt_ltnt = self.chords_style(nt_ltnt, self.const_tile)  # (batch * 2, strt_dim, fltr_size)
+            nts_fk = self.chords_extend(nt_ltnt, self.tk, self.out_seq_len)  # (batch * 2, out_seq_len, embed_dim)
+            tm_ltnt = self.time_style(tm_ltnt, self.const_tile)  # (batch * 2, strt_dim, fltr_size)
             tms_fk = self.time_extend(tm_ltnt, self.tk, self.out_seq_len)  # (batch * 2, out_seq_len, time_features)
-            de_in = self.notes_extend.notes_emb(tf.constant(
+            de_in = self.chords_extend.chords_emb(tf.constant(
                 [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch * 2, 1, embed_dim)
             pred_fk = self.disc(nts_fk, tms_fk, de_in)  # (batch * 2, 1)
-            vbs = self.notes_latent.trainable_variables + self.notes_extend.trainable_variables + \
-                  self.time_latent.trainable_variables + self.time_extend.trainable_variables
+            vbs = self.chords_style.trainable_variables + self.chords_extend.trainable_variables + \
+                  self.time_style.trainable_variables + self.time_extend.trainable_variables
 
         # no label smoothing
         lbls = tf.ones((self.batch_size * 2, 1), dtype=tf.float32)  # (batch * 2, 1)
@@ -291,20 +295,20 @@ class GAN(tf.keras.Model):
         loss_gen = tf.keras.losses.binary_crossentropy(lbls, pred_fk, from_logits=False, label_smoothing=0)
         return loss_gen, vbs
 
-    def save_models(self, const_path, save_notes_ltnt, save_notes_emb, save_notes_extend, save_time_ltnt, save_time_extend,
+    def save_models(self, const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt, save_time_extend,
                     load_disc, save_disc):
         pkl.dump(self.const.numpy(), open(os.path.join(const_path, 'constant.pkl'), 'wb'))
 
-        if self.mode_ in ['notes', 'both']:
-            if save_notes_ltnt:
-                self.cp_manager_notes_ltnt.save()
-                print('Saved the latest notes_ltnt')
-            if save_notes_emb:
-                self.cp_manager_notes_emb.save()
-                print('Saved the latest notes_emb')
-            if save_notes_extend:
-                self.cp_manager_notes_extend.save()
-                print('Saved the latest notes_extend')
+        if self.mode_ in ['chords', 'both']:
+            if save_chords_ltnt:
+                self.cp_manager_chords_ltnt.save()
+                print('Saved the latest chords_ltnt')
+            if save_chords_emb:
+                self.cp_manager_chords_emb.save()
+                print('Saved the latest chords_emb')
+            if save_chords_extend:
+                self.cp_manager_chords_extend.save()
+                print('Saved the latest chords_extend')
         if self.mode_ in ['time', 'both']:
             if save_time_ltnt:
                 self.cp_manager_time_ltnt.save()
@@ -317,11 +321,11 @@ class GAN(tf.keras.Model):
             print('Saved the latest discriminator for {}'.format(self.mode_))
 
     def train_step(self, nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr):
-        # nt_ltnt: notes random vector (batch, out_seq_len, 16)
+        # nt_ltnt: chords random vector (batch, out_seq_len, 16)
         # tm_ltnt: time random vector (batch, out_seq_len, 1)
-        # nt_ltnt2: notes random vector (batch, out_seq_len, 16)
+        # nt_ltnt2: chords random vector (batch, out_seq_len, 16)
         # tm_ltnt2: time random vector (batch, out_seq_len, 1)
-        # nts_tr: true sample notes (batch, in_seq_len)
+        # nts_tr: true sample chords (batch, in_seq_len)
         # tms_tr: true sample time (batch, in_seq_len, 3)
 
         # Step 1. train discriminator on true samples --------------------
@@ -353,14 +357,14 @@ class GAN(tf.keras.Model):
               print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
               warmup_steps=1000, disc_lr=0.0001, gen_lr=0.1,
               optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
-              const_path=const_path, notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
-              notes_emb_path=notes_emb_path, notes_extend_path=notes_extend_path, time_extend_path=time_extend_path,
-              notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+              const_path=const_path, chords_style_path=chords_style_path, time_style_path=time_style_path,
+              chords_emb_path=chords_emb_path, chords_extend_path=chords_extend_path, time_extend_path=time_extend_path,
+              chords_disc_path=chords_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
               result_path=result_path,
               train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
               train_ntgen=True, train_tmgen=True, train_disc=True,
-              save_notes_ltnt=True, save_time_ltnt=True, save_notes_emb=True,
-              save_notes_extend=True, save_time_extend=True, save_disc=True,
+              save_chords_ltnt=True, save_time_ltnt=True, save_chords_emb=True,
+              save_chords_extend=True, save_time_extend=True, save_disc=True,
               max_to_keep=5, load_disc=False,
               nt_ltnt_uniform=True, tm_ltnt_uniform=False, true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1)):
 
@@ -392,9 +396,9 @@ class GAN(tf.keras.Model):
         self.tm_ltnt_uniform = tm_ltnt_uniform
 
         self.load_model(
-            const_path=const_path, notes_latent_path=notes_latent_path, time_latent_path=time_latent_path,
-            notes_emb_path=notes_emb_path, notes_extend_path=notes_extend_path, time_extend_path=time_extend_path,
-            notes_disc_path=notes_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
+            const_path=const_path, chords_style_path=chords_style_path, time_style_path=time_style_path,
+            chords_emb_path=chords_emb_path, chords_extend_path=chords_extend_path, time_extend_path=time_extend_path,
+            chords_disc_path=chords_disc_path, time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
             train_ntlatent=train_ntlatent, train_tmlatent=train_tmlatent, train_ntemb=train_ntemb,
             train_ntgen=train_ntgen, train_tmgen=train_tmgen, train_disc=train_disc, max_to_keep=max_to_keep,
             load_disc=load_disc)
@@ -448,7 +452,7 @@ class GAN(tf.keras.Model):
                             loss_disc_tr.numpy().mean()))
 
                 if (i + 1) % 500 == 0:
-                    self.save_models(const_path, save_notes_ltnt, save_notes_emb, save_notes_extend, save_time_ltnt,
+                    self.save_models(const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt,
                                      save_time_extend, load_disc, save_disc)
                     mid = self.generate_music()
                     file_name = os.path.join(result_path, self.mode_, 'ep{}_{}.mid'.format(last_ep, i+1))
@@ -461,7 +465,7 @@ class GAN(tf.keras.Model):
                         epoch+1, self.train_loss_gen.result(), self.train_loss_disc.result(), time.time()-start))
 
             if (epoch+1) % save_model_step == 0:
-                self.save_models(const_path, save_notes_ltnt, save_notes_emb, save_notes_extend, save_time_ltnt,
+                self.save_models(const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt,
                                  save_time_extend, load_disc, save_disc)
                 log_current['epochs'] += epoch + 1
                 log.append(log_current)
@@ -476,16 +480,16 @@ class GAN(tf.keras.Model):
             last_ep += 1
 
     def generate_music(self):
-        if self.mode_ == 'notes':
+        if self.mode_ == 'chords':
             nt_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.nt_ltnt_uniform \
                 else util.latant_vector(self.batch_size, self.in_dim, 1, mean_=0, std_=1.5)
-            nts = self.notes_latent(nt_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
-            nts = self.notes_extend.predict_notes(nts, self.tk, self.out_seq_len, return_str=True)  # (1, in_seq_len)
+            nts = self.chords_style(nt_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
+            nts = self.chords_extend.predict_chords(nts, self.tk, self.out_seq_len, return_str=True)  # (1, in_seq_len)
             tms = np.array([[self.vel_norm, self.tmps_norm, self.dur_norm]] * self.out_seq_len)[np.newaxis, :, :]
         elif self.mode_ == 'time':
             tm_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.tm_ltnt_uniform \
                 else util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0, std_=1.5)
-            tms = self.time_latent(tm_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
+            tms = self.time_style(tm_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
             tms = self.time_extend.predict_time(
                 tms, self.out_seq_len, vel_norm=self.vel_norm, tmps_norm=self.tmps_norm, dur_norm=self.dur_norm,
                 return_denorm=True)  # (1, in_seq_len, time_features)
@@ -493,12 +497,12 @@ class GAN(tf.keras.Model):
         else:  # self.mode_ == 'both'
             nt_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.nt_ltnt_uniform \
                 else util.latant_vector(self.batch_size, self.in_dim, 1, mean_=0, std_=1.5)
-            nts = self.notes_latent(nt_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
-            nts = self.notes_extend.predict_notes(nts, self.tk, self.out_seq_len, return_str=True)  # (1, in_seq_len)
+            nts = self.chords_style(nt_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
+            nts = self.chords_extend.predict_chords(nts, self.tk, self.out_seq_len, return_str=True)  # (1, in_seq_len)
 
             tm_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.tm_ltnt_uniform \
                 else util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0, std_=1.5)
-            tms = self.time_latent(tm_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
+            tms = self.time_style(tm_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
             tms = self.time_extend.predict_time(
                 tms, self.out_seq_len, vel_norm=self.vel_norm, tmps_norm=self.tmps_norm, dur_norm=self.dur_norm,
                 return_denorm=True)  # (1, in_seq_len, time_features)
@@ -509,7 +513,6 @@ class GAN(tf.keras.Model):
         mid = preprocess.Conversion.arry2mid(ary)
         return mid
 
-# Todo: shrink embedding size from 256 to 32 or 16 !!!!!!!!!
 
 # Todo: modify discriminator, separate last layer from features layer ==> minimize distance of feature from discriminator to latent features
 # Todo: use minibatch Minibatch discrimination (https://towardsdatascience.com/gan-ways-to-improve-gan-performance-acf37f9f59b)
@@ -520,33 +523,40 @@ class GAN(tf.keras.Model):
 # try recycle gan
 
 """
-from tensorflow.keras.layers import Input
-
-in_seq_len=16
-out_seq_len=64
-ltnt_knl=5
-ltnt_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1)
-ltnt_fc_layers=4
-strt_token_id=15001
-out_notes_pool_size=15002
+out_seq_len_list=(4, 8, 16, 64)
 embed_dim=16
-n_heads=4
-max_pos=800
-time_features=3
-fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1)
-g_encoder_layers=2
-g_decoder_layers=2
-g_fc_layers=3
-g_norm_epsilon=1e-6
-g_embedding_dropout_rate=0.2
-g_transformer_dropout_rate=0.2
+strt_token_id=15001
+chords_pool_size=15002
+chords_max_pos=800
+chstl_fc_layers=4
+chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1)
+tmstl_fc_layers=4
+tmstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1)
+chsyn_kernel_size=3
+chsyn_n_heads=4
+chsyn_fc_activation="relu"
+chsyn_encoder_layers=3
+chsyn_decoder_layers=3
+chsyn_fc_layers=3
+chsyn_norm_epsilon=1e-6
+chsyn_embedding_dropout_rate=0.2
+chsyn_transformer_dropout_rate=0.2
+chsyn_activ=tf.keras.layers.LeakyReLU(alpha=0.1)
+tmsyn_kernel_size=3
+tmsyn_fc_activation="relu"
+tmsyn_encoder_layers=3
+tmsyn_decoder_layers=3
+tmsyn_fc_layers=3
+tmsyn_norm_epsilon=1e-6
+tmsyn_transformer_dropout_rate=0.2
+tmsyn_activ=tf.keras.layers.LeakyReLU(alpha=0.1)
 d_kernel_size=3
-d_encoder_layers=2
-d_decoder_layers=2
+d_encoder_layers=1
+d_decoder_layers=1
 d_fc_layers=3
 d_norm_epsilon=1e-6
 d_transformer_dropout_rate=0.2
-mode_='both'
+d_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1)
 
 
 custm_lr=True

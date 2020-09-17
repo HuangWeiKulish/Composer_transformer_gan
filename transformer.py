@@ -47,7 +47,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
 
 class Transformer(tf.keras.models.Model):
 
-    def __init__(self, embed_dim=256, n_heads=4, out_chords_pool_size=1000, encoder_layers=2, decoder_layers=2,
+    def __init__(self, embed_dim=16, n_heads=4, out_chords_pool_size=1000, encoder_layers=2, decoder_layers=2,
                  fc_layers=2, norm_epsilon=1e-6, dropout_rate=0.2, fc_activation="relu", out_positive=False):
         super(Transformer, self).__init__()
         assert embed_dim % n_heads == 0
