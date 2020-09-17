@@ -41,9 +41,10 @@ class GAN(tf.keras.models.Model):
                  strt_dim=4, strt_token_id=15001, chords_pool_size=15002, chords_max_pos=800,
                  chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                  tmstl_fc_layers=4, tmstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
+                 embedding_dropout_rate=0.2,
                  chsyn_kernel_size=3, chsyn_fc_activation="relu",
                  chsyn_encoder_layers=3, chsyn_decoder_layers=3, chsyn_fc_layers=3,
-                 chsyn_norm_epsilon=1e-6, chsyn_embedding_dropout_rate=0.2, chsyn_transformer_dropout_rate=0.2,
+                 chsyn_norm_epsilon=1e-6, chsyn_transformer_dropout_rate=0.2,
                  chsyn_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                  tmsyn_kernel_size=3, tmsyn_fc_activation="relu", tmsyn_encoder_layers=3, tmsyn_decoder_layers=3,
                  tmsyn_fc_layers=3, tmsyn_norm_epsilon=1e-6, tmsyn_transformer_dropout_rate=0.2,
@@ -75,14 +76,18 @@ class GAN(tf.keras.models.Model):
         self.chords_style = generator.Mapping(fc_layers=chstl_fc_layers, activ=chstl_activ)
         self.time_style = generator.Mapping(fc_layers=tmstl_fc_layers, activ=tmstl_activ)
 
+        # chords embedder
+        self.chords_emb = generator.ChordsEmbedder(
+            chords_pool_size=chords_pool_size, max_pos=chords_max_pos,
+            embed_dim=embed_dim, dropout_rate=embedding_dropout_rate)
+
         # chords generator
-        # todo: separate notes emb from sync
         self.chords_syn = [generator.ChordsSythesisBlock(
             embed_dim=embed_dim, strt_token_id=strt_token_id, out_seq_len=sql, kernel_size=chsyn_kernel_size,
             out_chords_pool_size=chords_pool_size, n_heads=n_heads, max_pos=chords_max_pos,
             fc_activation=chsyn_fc_activation, encoder_layers=chsyn_encoder_layers,
             decoder_layers=chsyn_decoder_layers, fc_layers=chsyn_fc_layers, norm_epsilon=chsyn_norm_epsilon,
-            embedding_dropout_rate=chsyn_embedding_dropout_rate,
+            embedding_dropout_rate=embedding_dropout_rate,
             transformer_dropout_rate=chsyn_transformer_dropout_rate, activ=chsyn_activ) for sql in out_seq_len_list] \
             if mode_ in ['chords', 'both'] else None
 
@@ -152,7 +157,7 @@ class GAN(tf.keras.models.Model):
 
         # ---------------------- call back setting --------------------------
         # todo: load according to out_seq_len_list
-        # todo: for notes embedding, always load the same one!!
+        # todo: load self.chords_emb
         # load latent models
         self.cp_chords_ltnt = tf.train.Checkpoint(model=self.chords_style, optimizer=self.optimizer_gen)
         self.cp_manager_chords_ltnt = tf.train.CheckpointManager(
@@ -232,6 +237,9 @@ class GAN(tf.keras.models.Model):
         pkl.dump(self.const_ch.numpy(), open(os.path.join(const_path, 'const_ch.pkl'), 'wb'))
         pkl.dump(self.const_tm.numpy(), open(os.path.join(const_path, 'const_tm.pkl'), 'wb'))
 
+
+        # todo: save self.chords_emb
+
         # todo: save according to out_seq_len_list??
         if self.mode_ in ['chords', 'both']:
             if save_chords_ltnt:
@@ -263,7 +271,7 @@ class GAN(tf.keras.models.Model):
                 # nt_styl: (batch, style_dim, 1)
                 # noise: (batch, embed_dim, 1)
                 noise = tf.random.normal((self.batch_size, self.embed_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
-                nt_conv_in = self.chords_syn[i]((nt_conv_in, nt_styl, noise))
+                nt_conv_in = self.chords_syn[i]((nt_conv_in, nt_styl, noise, self.chords_emb))
         if self.mode_ in ['time', 'both']:
             for i in range(len(self.time_syn)):
                 # tm_conv_in: (batch, updated strt_dim, time_features)
@@ -296,7 +304,18 @@ class GAN(tf.keras.models.Model):
         elif self.mode_ == 'time':
             tm_conv_in = self.syn(self.consttile_ch, nt_styl, self.consttile_tm, tm_styl)
         else:  # self.mode_ == 'both'
-            nt_conv_in, tm_conv_in = self.syn(self.consttile_ch, nt_styl, self.consttile_tm, tm_styl)
+            nt_conv_in, tm_conv_in = syn(consttile_ch, nt_styl, consttile_tm, tm_styl)
+
+            #tm_conv_in = tf.ones((10, 4, 3))
+            consttile_ch.shape
+            consttile_tm.shape
+            
+            init_nt_in = tf.matmul(consttile_ch, nt_styl)
+            init_nt_in.shape
+
+
+            # consttile_ch: (batch_size, strt_dim, embed_dim)
+            # consttile_tm: (batch, strt_dim, time_features)
 
         # nt_conv_in: (batch, out_seq_len_list[-1], embed_dim)
         # tm_conv_in: (batch, out_seq_len_list[-1], time_features)
@@ -597,7 +616,7 @@ chsyn_encoder_layers=3
 chsyn_decoder_layers=3
 chsyn_fc_layers=3
 chsyn_norm_epsilon=1e-6
-chsyn_embedding_dropout_rate=0.2
+embedding_dropout_rate=0.2
 chsyn_transformer_dropout_rate=0.2
 chsyn_activ=tf.keras.layers.LeakyReLU(alpha=0.1)
 tmsyn_kernel_size=3
