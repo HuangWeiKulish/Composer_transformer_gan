@@ -17,7 +17,7 @@ chords_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_
 chords_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_extender'
 time_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_extender'
 
-tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_final.pkl'
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/notes_dict_final.pkl'
 tk = pkl.load(open(tk_path, 'rb'))
 chords_pool_size = len(json.loads(tk.get_config()['word_counts']))
 print(chords_pool_size)
@@ -27,20 +27,20 @@ print(chords_pool_size)
 in_seq_len, out_seq_len = 16, 64
 
 dataset = util.load_true_data_pretrain_gen(
-    tk, in_seq_len, out_seq_len, step=60, batch_size=100,
+    tk, in_seq_len, out_seq_len, step=10, batch_size=100,
     vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
     pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['noc'])  # todo !!!
 
 chords_ext = generator.ChordsExtend(
     out_chords_pool_size=15002, embed_dim=16, n_heads=4, max_pos=800, fc_activation="relu",
-    encoder_layers=5, decoder_layers=5,
+    encoder_layers=3, decoder_layers=3,
     fc_layers=3, norm_epsilon=1e-6, embedding_dropout_rate=0.2, transformer_dropout_rate=0.2)
 
-chords_ext.train(dataset, epochs=1000, save_model_step=1,
-                chords_emb_path=chords_emb_path, chords_extend_path=chords_extend_path,
-                max_to_keep=5, print_batch=True, print_batch_step=100, print_epoch=True, print_epoch_step=1,
-                warmup_steps=40000,
-                optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9))
+chords_ext.train(dataset, epochs=50, save_model_step=1,
+                 chords_emb_path=chords_emb_path, chords_extend_path=chords_extend_path,
+                 max_to_keep=5, print_batch=True, print_batch_step=100, print_epoch=True, print_epoch_step=1,
+                 warmup_steps=40000,
+                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9))
 
 
 """
@@ -49,7 +49,6 @@ chords_ext.load_model(chords_emb_path, chords_extend_path, max_to_keep=5)
 
 out_seq_len = 64
 test_x_in, test_tar_in, test_tar_out = list(dataset.prefetch(1))[0]
-
 spl = np.random.choice(range(test_x_in.shape[0]))
 
 # pred

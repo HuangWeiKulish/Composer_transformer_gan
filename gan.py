@@ -58,13 +58,17 @@ class GAN(tf.keras.models.Model):
         # ---------------------------------- settings ----------------------------------
         self.mode_ = mode_
         self.out_seq_len_list = out_seq_len_list
+        self.embed_dim = embed_dim
+        self.time_features = time_features
         self.in_dim = in_dim
         self.strt_dim = strt_dim
         self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
 
         # ----------------------------- constant layer -----------------------------
-        # const: (1, strt_dim, in_dim)
-        self.const = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32)
+        # const_ch: (1, strt_dim, in_dim)
+        # const_tm: (1, strt_dim, in_dim)
+        self.const_ch = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32)
+        self.const_tm = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32)
 
         # ---------------------------------- layers ----------------------------------
         # latent vector generator
@@ -72,6 +76,7 @@ class GAN(tf.keras.models.Model):
         self.time_style = generator.Mapping(fc_layers=tmstl_fc_layers, activ=tmstl_activ)
 
         # chords generator
+        # todo: separate notes emb from sync
         self.chords_syn = [generator.ChordsSythesisBlock(
             embed_dim=embed_dim, strt_token_id=strt_token_id, out_seq_len=sql, kernel_size=chsyn_kernel_size,
             out_chords_pool_size=chords_pool_size, n_heads=n_heads, max_pos=chords_max_pos,
@@ -129,16 +134,25 @@ class GAN(tf.keras.models.Model):
                    train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
                    train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5,
                    load_disc=False):
-        # todo: load according to out_seq_len_list
         try:
             # const: (1, strt_dim, in_dim)
-            self.const = pkl.load(open(os.path.join(const_path, 'constant.pkl'), 'rb'))  # numpy array
-            self.const = tf.Variable(self.const, dtype=tf.float32)  # convert to variable
-            print('Restored the latest constant')
+            const_ch = pkl.load(open(os.path.join(const_path, 'const_ch.pkl'), 'rb'))  # numpy array
+            self.const_ch = tf.Variable(const_ch, dtype=tf.float32)  # convert to variable
+            print('Restored the latest const_ch')
+        except:
+            pass
+
+        try:
+            # const: (1, strt_dim, in_dim)
+            const_tm = pkl.load(open(os.path.join(const_path, 'const_ch.pkl'), 'rb'))  # numpy array
+            self.const_tm = tf.Variable(const_tm, dtype=tf.float32)  # convert to variable
+            print('Restored the latest const_tm')
         except:
             pass
 
         # ---------------------- call back setting --------------------------
+        # todo: load according to out_seq_len_list
+        # todo: for notes embedding, always load the same one!!
         # load latent models
         self.cp_chords_ltnt = tf.train.Checkpoint(model=self.chords_style, optimizer=self.optimizer_gen)
         self.cp_manager_chords_ltnt = tf.train.CheckpointManager(
@@ -213,11 +227,12 @@ class GAN(tf.keras.models.Model):
         if train_disc:
             util.model_trainable(self.disc, trainable=train_disc)
 
-    def save_models(self, const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt, save_time_extend,
-                    load_disc, save_disc):
-        # todo: load according to out_seq_len_list
-        pkl.dump(self.const.numpy(), open(os.path.join(const_path, 'constant.pkl'), 'wb'))
+    def save_models(self, const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt,
+                    save_time_extend, load_disc, save_disc):
+        pkl.dump(self.const_ch.numpy(), open(os.path.join(const_path, 'const_ch.pkl'), 'wb'))
+        pkl.dump(self.const_tm.numpy(), open(os.path.join(const_path, 'const_tm.pkl'), 'wb'))
 
+        # todo: save according to out_seq_len_list??
         if self.mode_ in ['chords', 'both']:
             if save_chords_ltnt:
                 self.cp_manager_chords_ltnt.save()
@@ -239,35 +254,73 @@ class GAN(tf.keras.models.Model):
             self.cp_manager_disc.save()
             print('Saved the latest discriminator for {}'.format(self.mode_))
 
+    def syn(self, nt_conv_in, nt_styl, tm_conv_in, tm_styl):
+        # nt_conv_in: (batch_size, strt_dim, embed_dim)
+        # tm_conv_in: (batch, strt_dim, time_features)
+        if self.mode_ in ['chords', 'both']:
+            for i in range(len(self.chords_syn)):
+                # nt_conv_in: (batch, updated strt_dim, embed_dim)
+                # nt_styl: (batch, style_dim, 1)
+                # noise: (batch, embed_dim, 1)
+                noise = tf.random.normal((self.batch_size, self.embed_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
+                nt_conv_in = self.chords_syn[i]((nt_conv_in, nt_styl, noise))
+        if self.mode_ in ['time', 'both']:
+            for i in range(len(self.time_syn)):
+                # tm_conv_in: (batch, updated strt_dim, time_features)
+                # tm_styl: (batch, style_dim, 1)
+                # noise: (batch, embed_dim, 1)
+                noise = tf.random.normal((self.batch_size, self.time_features, 1), mean=0, stddev=1.0, dtype=tf.float32)
+                tm_conv_in = self.time_syn[i]((tm_conv_in, tm_styl, noise))
+        if self.mode_ == 'both':
+            return nt_conv_in, tm_conv_in
+        if self.mode_ == 'chords':
+            return nt_conv_in
+        return tm_conv_in
+
     def train_discriminator(self, nt_ltnt, tm_ltnt, nts_tr, tms_tr, fake_mode=True):
         # nt_ltnt: (batch, in_dim, 1) np.array or None
         # tm_ltnt: (batch, in_dim, 1) np.array or None
-        # nts_tr: (batch, in_dim, 1) tf.tensor or None
-        # tms_tr: (batch, in_dim, 1) tf.tensor or None
+        # nts_tr: true sample chords (batch, in_seq_len) np.array or None
+        # tms_tr: true sample time (batch, in_seq_len, 3) np.array or None
         # unfreeze discriminator
         if self.train_disc:
             util.model_trainable(self.disc, trainable=True)
 
+            # todo: freeze previous layers of syn network?
+
         # discriminator prediction
+        nt_styl = self.chords_style(nt_ltnt) if self.mode_ in ['chords', 'both'] else None  # (batch, in_dim, 1)
+        tm_styl = self.chords_style(tm_ltnt) if self.mode_ in ['time', 'both'] else None  # (batch, in_dim, 1)
         if self.mode_ == 'chords':
-            nts = self.chords_extend(self.chords_style(nt_ltnt, self.const_tile), self.tk, self.out_seq_len)\
-                if fake_mode else self.chords_extend.chords_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
-            de_in = self.chords_extend.chords_emb(tf.constant(
-                [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
-            pred = self.disc(nts, de_in)  # (batch, 1)
+            nt_conv_in = self.syn(self.consttile_ch, nt_styl, self.consttile_tm, tm_styl)
         elif self.mode_ == 'time':
-            tms = self.time_extend(self.time_style(tm_ltnt, self.const_tile), self.tk, self.out_seq_len) \
-                if fake_mode else tms_tr
-            de_in = tf.constant([[[0] * 3]] * self.batch_size, dtype=tf.float32)  # (batch, 1, time_features)
-            pred = self.disc(tms, de_in)  # (batch, 1)
+            tm_conv_in = self.syn(self.consttile_ch, nt_styl, self.consttile_tm, tm_styl)
         else:  # self.mode_ == 'both'
-            nts = self.chords_extend(self.chords_style(nt_ltnt, self.const_tile), self.tk, self.out_seq_len) \
-                if fake_mode else self.chords_extend.chords_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
-            tms = self.time_extend(self.time_style(tm_ltnt, self.const_tile), self.tk, self.out_seq_len) \
-                if fake_mode else tms_tr
-            de_in = self.chords_extend.chords_emb(tf.constant(
-                [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
-            pred = self.disc(nts, tms, de_in)  # (batch, 1)
+            nt_conv_in, tm_conv_in = self.syn(self.consttile_ch, nt_styl, self.consttile_tm, tm_styl)
+
+        # nt_conv_in: (batch, out_seq_len_list[-1], embed_dim)
+        # tm_conv_in: (batch, out_seq_len_list[-1], time_features)
+
+        # de_in = chords_extend.chords_emb(tf.constant(
+        #     [[strt_token_id]] * batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
+        #
+        #
+
+
+        disc((nt_conv_in, tm_conv_in, de_in))
+
+        nt_in, tm_in, de_in = inputs
+        # de_in: (batch, 1, embed_dim): the '<start>' embedding
+        # nt_in: (batch, seq_len, embed_dim)
+        # tm_in: (batch, seq_len, 3): 3 for [velocity, velocity, time since last start, notes duration]
+
+            #
+            # nts = self.chords_extend(self.chords_style(nt_ltnt, self.const_tile), self.tk, self.out_seq_len) \
+            #     if fake_mode else self.chords_extend.chords_emb(nts_tr)  # (batch, out_seq_len, embed_dim)
+            # tms = self.time_extend(self.time_style(tm_ltnt, self.const_tile), self.tk, self.out_seq_len) \
+            #     if fake_mode else tms_tr
+
+            # pred = self.disc(nts, tms, de_in)  # (batch, 1)
 
         lbl = tf.random.uniform(
             (self.batch_size, 1), minval=self.fake_label_smooth[0], maxval=self.fake_label_smooth[1],
@@ -318,13 +371,16 @@ class GAN(tf.keras.models.Model):
         loss_gen = tf.keras.losses.binary_crossentropy(lbls, pred_fk, from_logits=False, label_smoothing=0)
         return loss_gen, vbs
 
-    def train_step(self, nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr):
+    def train_step(self, inputs, recycle=True):
+        nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr = inputs
         # nt_ltnt: chords random vector (batch, out_seq_len, 16)
         # tm_ltnt: time random vector (batch, out_seq_len, 1)
         # nt_ltnt2: chords random vector (batch, out_seq_len, 16)
         # tm_ltnt2: time random vector (batch, out_seq_len, 1)
         # nts_tr: true sample chords (batch, in_seq_len)
         # tms_tr: true sample time (batch, in_seq_len, 3)
+
+        # todo: get disc_preout!!
 
         # Step 1. train discriminator on true samples --------------------
         with tf.GradientTape() as tape:
@@ -400,8 +456,12 @@ class GAN(tf.keras.models.Model):
             train_ntgen=train_ntgen, train_tmgen=train_tmgen, train_disc=train_disc, max_to_keep=max_to_keep,
             load_disc=load_disc)
 
-        # const_tile: (batch, strt_dim, in_dim)
-        self.const_tile = tf.tile(self.const, tf.constant([self.batch_size, 1, 1], tf.int32))
+        # consttile_ch: (batch, strt_dim, in_dim)
+        self.consttile_ch = tf.tile(self.const_ch, tf.constant([self.batch_size, 1, 1], tf.int32))
+        # consttile_tm: (batch, strt_dim, in_dim)
+        self.consttile_tm = tf.tile(self.const_tm, tf.constant([self.batch_size, 1, 1], tf.int32))
+
+        disc_preout_nts, disc_preout_tms = None, None
 
         # ---------------------- training --------------------------
         for epoch in range(epochs):
@@ -419,19 +479,22 @@ class GAN(tf.keras.models.Model):
                 # tms_tr: (batch, seq_len, 3)
                 nts_tr, tms_tr = true_samples[:, :, 0], true_samples[:, :, 1:]
                 # random vectors ---------------------------
-                # todo: recycle!!!
                 # nt_ltnt: (batch, in_dim, 1)
-                nt_ltnt = tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
+                nt_ltnt = disc_preout_nts if recycle & (disc_preout_nts is not None) \
+                    else tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
                 # tm_ltnt: (batch, in_dim, 1)
-                tm_ltnt = tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
+                tm_ltnt = disc_preout_tms if recycle & (disc_preout_tms is not None) \
+                    else tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
 
                 # nt_ltnt2: (batch * 2, in_dim, 1)
                 nt_ltnt2 = tf.random.normal((self.batch_size * 2, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
                 # tm_ltnt2: (batch * 2, in_dim, 1)
                 tm_ltnt2 = tf.random.normal((self.batch_size * 2, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
 
+
+                # todo: get disc_preout!!
                 loss_disc_tr, loss_disc_fk, loss_gen = self.train_step(
-                    nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr)
+                   (nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, nts_tr, tms_tr), recycle=recycle)
 
                 if print_batch:
                     if (i + 1) % print_batch_step == 0:

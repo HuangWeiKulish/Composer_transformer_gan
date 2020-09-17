@@ -46,11 +46,11 @@ class Mapping(tf.keras.layers.Layer):
         # x: (batch, in_dim, 1)
         mean_ = tf.math.reduce_mean(x, axis=[1])
         std_ = tf.math.reduce_std(x, axis=[1]) + tf.constant([0.0001], dtype=tf.float32)
-        out = (x - mean_) / std_
+        out = (x - mean_[:, :, np.newaxis]) / std_[:, :, np.newaxis]
         out = self.fcs(out, training=training)  # (batch, in_dim, 1)
         return out
 
-
+# todo: separqate ChordsEmbedder from ChordsExtend
 class ChordsEmbedder(tf.keras.layers.Layer):
 
     def __init__(self, chords_pool_size, max_pos, embed_dim=16, dropout_rate=0.2):
@@ -262,7 +262,7 @@ class ChordsSythesisBlock(tf.keras.models.Model):
     def call(self, inputs, training=None, mask=None):
         # conv_in: (batch, updated strt_dim, embed_dim)
         # style_in: (batch, style_dim, 1)
-        # noise: (embed_dim, 1)
+        # noise: (batch, embed_dim, 1)
         conv_in, style_in, noise = inputs
 
         b = self.b_fcs[0](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
@@ -300,7 +300,7 @@ class TimeExtend(tf.keras.models.Model):
     def call(self, inputs, training=None, mask=None):
         # x_en: (batch_size, in_seq_len, time_features)
         # x_de: (batch_size, 1, time_features)
-        x_en, tk, out_seq_len = inputs
+        x_en, out_seq_len = inputs
         batch_size = x_en.shape[0]
         x_de = tf.constant([[[0] * 3]] * batch_size, dtype=tf.float32)
         for i in range(out_seq_len):
