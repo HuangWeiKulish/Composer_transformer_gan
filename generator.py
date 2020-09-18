@@ -108,8 +108,7 @@ class ChordsExtendPretrain(tf.keras.models.Model):
         self.chords_extend = transformer.Transformer(
             embed_dim=embed_dim, n_heads=n_heads, out_chords_pool_size=out_chords_pool_size,
             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
-            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation,
-            out_positive=False)
+            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation)
 
     def call(self, inputs, training=None, mask=None):
         # x_en: (batch_size, in_seq_len, embed_dim)
@@ -242,10 +241,9 @@ class TimeExtendPretrain(tf.keras.models.Model):
         self.time_extend = transformer.Transformer(
             embed_dim=time_features, n_heads=1, out_chords_pool_size=time_features,
             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
-            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation,
-            out_positive=True)
+            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation)
 
-    def call(self, inputs, training=None, mask=None):
+    def call(self, inputs, training=None, mask=None, positive=True):
         # x_en: (batch_size, in_seq_len, time_features)
         # x_de: (batch_size, 1, time_features)
         x_en, out_seq_len = inputs
@@ -256,6 +254,8 @@ class TimeExtendPretrain(tf.keras.models.Model):
             mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
             # x_out: (batch_size, 1, out_chords_pool_size)
             x_out, _ = self.time_extend((x_en, x_de, mask_padding, mask_lookahead))
+            if positive:
+                x_out = tf.keras.activations.softplus(x_out)  # force the value to be positive
             x_de = tf.concat((x_de, x_out[:, -1][:, tf.newaxis]), axis=1)
         return x_de[:, 1:, :]  # (batch_size, out_seq_len, time_features)
 

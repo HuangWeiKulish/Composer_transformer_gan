@@ -37,8 +37,7 @@ class TimeDiscriminator(tf.keras.Model):
         self.discr = transformer.Transformer(
             embed_dim=time_features, n_heads=1, out_chords_pool_size=pre_out_dim,
             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
-            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation,
-            out_positive=False)
+            norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation)
         self.last_fc = tf.keras.layers.Dense(1, activation='sigmoid')
 
     def call(self, inputs, return_vec=False, training=None, mask=None):
