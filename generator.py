@@ -93,32 +93,31 @@ class ChordsEmbedder(tf.keras.layers.Layer):
         return tf.cast(pos_encoding, dtype=tf.float32)
 
 
-class ChordsExtend(tf.keras.models.Model):
+class ChordsExtendPretrain(tf.keras.models.Model):
 
     def __init__(self, strt_token_id=15001, out_chords_pool_size=15002, embed_dim=16, n_heads=4, max_pos=800,
                  fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
-                 embedding_dropout_rate=0.2, transformer_dropout_rate=0.2, with_embed_dim=True):
-        super(ChordsExtend, self).__init__()
+                 embedding_dropout_rate=0.2, transformer_dropout_rate=0.2):
+        super(ChordsExtendPretrain, self).__init__()
         assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
         self.strt_token_id = strt_token_id  # tk.word_index['<start>']
         self.embed_dim = embed_dim
-        self.with_embed_dim = with_embed_dim
         self.chords_emb = ChordsEmbedder(
             chords_pool_size=out_chords_pool_size, max_pos=max_pos, embed_dim=embed_dim,
-            dropout_rate=embedding_dropout_rate) if with_embed_dim else None
+            dropout_rate=embedding_dropout_rate)
         self.chords_extend = transformer.Transformer(
             embed_dim=embed_dim, n_heads=n_heads, out_chords_pool_size=out_chords_pool_size,
             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
             norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation,
             out_positive=False)
 
-    def call(self, inputs, training=None, mask=None, chords_emb=None):
+    def call(self, inputs, training=None, mask=None):
         # x_en: (batch_size, in_seq_len, embed_dim)
         # x_de: (batch_size, 1, embed_dim)
         x_en, out_seq_len = inputs
         batch_size = x_en.shape[0]
         x_de = tf.constant([[self.strt_token_id]] * batch_size, dtype=tf.float32)
-        x_de = self.chords_emb(x_de) if self.with_embed_dim else chords_emb(x_de)
+        x_de = self.chords_emb(x_de)
         for i in range(out_seq_len):
             mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
             mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
@@ -126,16 +125,15 @@ class ChordsExtend(tf.keras.models.Model):
             x_out, _ = self.chords_extend((x_en, x_de, mask_padding, mask_lookahead))
             # translate prediction to text
             pred = tf.argmax(x_out, -1)  # (batch_size, 1)
-            x_de = tf.concat((x_de, self.chords_emb(pred[:, -1][:, tf.newaxis]) if self.with_embed_dim \
-                else chords_emb(pred[:, -1][:, tf.newaxis])), axis=1)
+            x_de = tf.concat((x_de, self.chords_emb(pred[:, -1][:, tf.newaxis])), axis=1)
         return x_de[:, 1:, :]  # (batch_size, out_seq_len, embed_dim)
 
-    def predict_chords(self, x_en, tk, out_seq_len, return_str=True, chords_emb=None):
+    def predict_chords(self, x_en, tk, out_seq_len, return_str=True):
         # x_en: (batch_size, in_seq_len, embed_dim)
         # x_de: (batch_size, 1, embed_dim)
         batch_size = x_en.shape[0]
         x_de = tf.constant([[tk.word_index['<start>']]] * batch_size, dtype=tf.float32)
-        x_de = self.chords_emb(x_de) if self.with_embed_dim else chords_emb(x_de)
+        x_de = self.chords_emb(x_de)
         result = []  # (out_seq_len, batch)
         for i in range(out_seq_len):
             mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
@@ -146,8 +144,7 @@ class ChordsExtend(tf.keras.models.Model):
             pred = tf.argmax(x_out, -1)
             pred = [nid for nid in pred.numpy()[:, -1]]  # len = batch, take the last prediction
             # append pred to x_de:
-            x_de = tf.concat((x_de, self.chords_emb(np.expand_dims(pred, axis=-1)) if self.with_embed_dim \
-                else chords_emb(np.expand_dims(pred, axis=-1))), axis=1)
+            x_de = tf.concat((x_de, self.chords_emb(np.expand_dims(pred, axis=-1))), axis=1)
             if return_str:
                 # !! use pd + 1 because tk index starts from 1
                 result.append([tk.index_word[pd + 1] for pd in pred])  # return chords string
@@ -157,13 +154,12 @@ class ChordsExtend(tf.keras.models.Model):
         return result  # chords string
 
     def load_model(self, chords_emb_path, chords_extend_path, max_to_keep=5):
-        if self.with_embed_dim:
-            self.cp_chords_emb = tf.train.Checkpoint(model=self.chords_emb, optimizer=self.optimizer)
-            self.cp_manager_chords_emb = tf.train.CheckpointManager(
-                self.cp_chords_emb, chords_emb_path, max_to_keep=max_to_keep)
-            if self.cp_manager_chords_emb.latest_checkpoint:
-                self.cp_chords_emb.restore(self.cp_manager_chords_emb.latest_checkpoint)
-                print('Restored the latest chords_emb')
+        self.cp_chords_emb = tf.train.Checkpoint(model=self.chords_emb, optimizer=self.optimizer)
+        self.cp_manager_chords_emb = tf.train.CheckpointManager(
+            self.cp_chords_emb, chords_emb_path, max_to_keep=max_to_keep)
+        if self.cp_manager_chords_emb.latest_checkpoint:
+            self.cp_chords_emb.restore(self.cp_manager_chords_emb.latest_checkpoint)
+            print('Restored the latest chords_emb')
 
         self.cp_chords_extend = tf.train.Checkpoint(model=self.chords_extend, optimizer=self.optimizer)
         self.cp_manager_chords_extend = tf.train.CheckpointManager(
@@ -190,18 +186,13 @@ class ChordsExtend(tf.keras.models.Model):
             #  x_in_nt: (batch, in_seq_len, embed_dim)
             #  x_tar_in_nt: (batch, out_seq_len, embed_dim)
             #  x_tar_out_nt: (batch, out_seq_len, embed_dim)
-            if self.with_embed_dim:
-                x_in_nt, x_tar_in_nt, x_tar_out_nt = \
-                    self.chords_emb(x_in_nt), self.chords_emb(x_tar_in_nt), self.chords_emb(x_tar_out_nt)
-            else:
-                x_in_nt, x_tar_in_nt, x_tar_out_nt = \
+            x_in_nt, x_tar_in_nt, x_tar_out_nt = \
                     chords_emb(x_in_nt), chords_emb(x_tar_in_nt), chords_emb(x_tar_out_nt)
 
             # x_out_nt_pr: (batch, out_seq_len, out_chords_pool_size)
             x_out_nt_pr, _ = self.chords_extend((x_in_nt, x_tar_in_nt, mask_padding, mask_lookahead))
             loss_chords = util.loss_func_chords(x_tar_out[:, :, 0], x_out_nt_pr)
-            variables_chords = self.chords_emb.trainable_variables + self.chords_extend.trainable_variables \
-                if self.with_embed_dim else self.chords_extend.trainable_variables
+            variables_chords = self.chords_emb.trainable_variables + self.chords_extend.trainable_variables
 
             gradients = tape.gradient(loss_chords, variables_chords)
             self.optimizer.apply_gradients(zip(gradients, variables_chords))
@@ -241,67 +232,11 @@ class ChordsExtend(tf.keras.models.Model):
                 print('Saved the latest chords_extend')
 
 
-class ChordsSythesisBlock(tf.keras.models.Model):
-
-    def __init__(self, embed_dim=16, strt_token_id=15001, out_seq_len=4, kernel_size=3, out_chords_pool_size=15002,
-                 n_heads=4, max_pos=800, fc_activation="relu", encoder_layers=5, decoder_layers=5, fc_layers=3,
-                 norm_epsilon=1e-6, embedding_dropout_rate=0.2, transformer_dropout_rate=0.2,
-                 activ=tf.keras.layers.LeakyReLU(alpha=0.1)):
-        # generate latent vector of dimension; (batch, in_seq_len, in_features)
-        # input: tf.keras.layers.Input(shape=(in_dim, 1))
-        # example: input random time vector (batch, 16, 1) ==> output latent vector (batch, 16, 3)
-        #          input random chords vector (batch, 16, 1) ==> output latent vector (batch, 16, 16)
-        super(ChordsSythesisBlock, self).__init__()
-        assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
-
-        self.out_seq_len = out_seq_len
-        self.strt_token_id = strt_token_id
-        self.activ = activ
-        self.g_fcs = [tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='zeros')
-                      for _ in range(2)]
-        self.b_fcs = [tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='ones')
-                      for _ in range(2)]
-        self.n_cv1s = [tf.keras.layers.Conv1D(
-            out_seq_len, kernel_size=kernel_size, padding='same', kernel_initializer='zeros', bias_initializer='zeros')
-            for _ in range(2)]
-        self.up_trs = [ChordsExtend(
-            strt_token_id=strt_token_id, out_chords_pool_size=out_chords_pool_size, embed_dim=embed_dim,
-            n_heads=n_heads, max_pos=max_pos, fc_activation=fc_activation, encoder_layers=encoder_layers,
-            decoder_layers=decoder_layers, fc_layers=fc_layers, norm_epsilon=norm_epsilon,
-            embedding_dropout_rate=embedding_dropout_rate, transformer_dropout_rate=transformer_dropout_rate,
-            with_embed_dim=False)
-            for _ in range(2)]
-
-    def call(self, inputs, training=None, mask=None):
-        # conv_in: (batch, updated strt_dim, embed_dim)
-        # style_in: (batch, style_dim, 1)
-        # noise: (batch, embed_dim, 1)
-        conv_in, style_in, noise, chords_emb = inputs
-
-        b = self.b_fcs[0](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
-        g = self.g_fcs[0](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
-        n = tf.transpose(self.n_cv1s[0](noise), perm=(0, 2, 1))  # (batch, out_seq_len, embed_dim)
-        out = self.up_trs[0]((conv_in, self.out_seq_len), chords_emb=chords_emb)  # (batch, out_seq_len, embed_dim)
-        out = tf.add(out, n)  # (batch, out_seq_len, embed_dim)
-        out = AdaInstanceNormalization()([out, b, g])  # (batch, out_seq_len, embed_dim)
-        out = self.activ(out)  # (batch, out_seq_len, embed_dim)
-
-        b2 = self.b_fcs[1](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
-        g2 = self.g_fcs[1](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
-        n2 = tf.transpose(self.n_cv1s[1](noise), perm=(0, 2, 1))  # (batch, out_seq_len, embed_dim)
-        out = self.up_trs[1]((out, self.out_seq_len), chords_emb=chords_emb)  # (batch, out_seq_len, embed_dim)
-        out = tf.add(out, n2)  # (batch, out_seq_len, embed_dim)
-        out = AdaInstanceNormalization()([out, b2, g2])  # (batch, out_seq_len, embed_dim)
-        out = self.activ(out)  # (batch, out_seq_len, embed_dim)
-
-        return out
-
-
-class TimeExtend(tf.keras.models.Model):
+class TimeExtendPretrain(tf.keras.models.Model):
 
     def __init__(self, time_features=3, fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3,
                  norm_epsilon=1e-6, transformer_dropout_rate=0.2):
-        super(TimeExtend, self).__init__()
+        super(TimeExtendPretrain, self).__init__()
         self.time_features = time_features
         # 3 for [velocity, velocity, time since last start, chords duration]
         self.time_extend = transformer.Transformer(
@@ -342,6 +277,7 @@ class TimeExtend(tf.keras.models.Model):
         result = np.transpose(np.array(result, dtype=object), (1, 0, 2))  # (batch, out_seq_len, 3)
         if return_denorm:
             result = result * np.array([vel_norm, tmps_norm, dur_norm])
+            result[:, 0] = np.clip(result[:, 0], 0, 127)  # squeeze velocity within limit
         return result
 
     def load_model(self, time_extend_path, max_to_keep=5):
@@ -403,54 +339,4 @@ class TimeExtend(tf.keras.models.Model):
             if (epoch + 1) % save_model_step == 0:
                 self.cp_manager_time_extend.save()
                 print('Saved the latest time_extend')
-
-
-class TimeSythesisBlock(tf.keras.models.Model):
-
-    def __init__(self, out_seq_len=4, kernel_size=3, time_features=3, fc_activation="relu",
-                 encoder_layers=5, decoder_layers=5, fc_layers=3, norm_epsilon=1e-6, transformer_dropout_rate=0.2,
-                 activ=tf.keras.layers.LeakyReLU(alpha=0.1)):
-        # generate latent vector of dimension; (batch, in_seq_len, in_features)
-        # input: tf.keras.layers.Input(shape=(in_dim, 1))
-        # example: input random time vector (batch, 16, 1) ==> output latent vector (batch, 16, 3)
-        #          input random chords vector (batch, 16, 1) ==> output latent vector (batch, 16, 16)
-        super(TimeSythesisBlock, self).__init__()
-        self.out_seq_len = out_seq_len
-        self.activ = activ
-        self.g_fcs = [tf.keras.layers.Dense(time_features, kernel_initializer='he_normal', bias_initializer='zeros')
-                      for _ in range(2)]
-        self.b_fcs = [tf.keras.layers.Dense(time_features, kernel_initializer='he_normal', bias_initializer='ones')
-                      for _ in range(2)]
-        self.n_cv1s = [tf.keras.layers.Conv1D(
-            out_seq_len, kernel_size=kernel_size, padding='same', kernel_initializer='zeros', bias_initializer='zeros')
-            for _ in range(2)]
-        self.up_trs = [TimeExtend(
-            time_features=time_features, fc_activation=fc_activation, encoder_layers=encoder_layers,
-            decoder_layers=decoder_layers, fc_layers=fc_layers, norm_epsilon=norm_epsilon,
-            transformer_dropout_rate=transformer_dropout_rate)
-            for _ in range(2)]
-
-    def call(self, inputs, training=None, mask=None):
-        # conv_in: (batch, updated strt_dim, time_features)
-        # style_in: (batch, style_dim, 1)
-        # noise: (time_features, 1)
-        conv_in, style_in, noise = inputs
-
-        b = self.b_fcs[0](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
-        g = self.g_fcs[0](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
-        n = tf.transpose(self.n_cv1s[0](noise), perm=(0, 2, 1))  # (batch, out_seq_len, time_features)
-        out = self.up_trs[0]((conv_in, self.out_seq_len))  # (batch, out_seq_len, time_features)
-        out = tf.add(out, n)  # (batch, out_seq_len, time_features)
-        out = AdaInstanceNormalization()([out, b, g])  # (batch, out_seq_len, time_features)
-        out = self.activ(out)  # (batch, out_seq_len, time_features)
-
-        b2 = self.b_fcs[1](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
-        g2 = self.g_fcs[1](tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
-        n2 = tf.transpose(self.n_cv1s[1](noise), perm=(0, 2, 1))  # (batch, out_seq_len, time_features)
-        out = self.up_trs[1]((out, self.out_seq_len))  # (batch, out_seq_len, time_features)
-        out = tf.add(out, n2)  # (batch, out_seq_len, time_features)
-        out = AdaInstanceNormalization()([out, b2, g2])  # (batch, out_seq_len, time_features)
-        out = self.activ(out)  # (batch, out_seq_len, time_features)
-
-        return out
 

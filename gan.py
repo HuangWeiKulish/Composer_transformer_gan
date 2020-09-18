@@ -11,6 +11,7 @@ import util
 import discriminator
 import generator
 import preprocess
+import transformer
 
 const_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/constant'
 
@@ -18,6 +19,7 @@ chords_style_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Compose
 time_style_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_style'
 
 chords_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_embedder'
+
 chords_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_extender'
 time_extend_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_extender'
 
@@ -31,8 +33,235 @@ vel_norm = 64.0
 tmps_norm = 0.12
 dur_norm = 1.3
 
-# tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/notes_dict_final.pkl'
-# tk = pkl.load(open(tk_path, 'rb'))
+"""
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/notes_dict_final.pkl'
+tk = pkl.load(open(tk_path, 'rb'))
+"""
+
+
+def syn_init_layer(consttile, styl, ini_layer):
+    # how in ['chords', 'time']
+    # consttile: (batch, strt_dim, in_dim)
+    # styl: (batch, in_dim, 1)
+    # ini_layer: tf.keras.layers.Dense
+    ini = tf.matmul(consttile, styl)  # (batch, strt_dim, 1)
+    return ini_layer(ini)  # (batch, strt_dim, embed_dim) for chords or (batch, strt_dim, time_features) for time
+
+
+def extend_chords(x_en, out_seq_len, strt_token_id, chords_emb, up_tr, tk, return_str=False):
+    # x_en: (batch_size, in_seq_len, embed_dim)
+    # chords_emb: generator.ChordsEmbedder
+    # up_tr: transformer.Transformer
+    batch_size = x_en.shape[0]
+    x_de = tf.constant([[strt_token_id]] * batch_size, dtype=tf.float32)
+    x_de = chords_emb(x_de)  # (batch_size, 1, embed_dim)
+    result = []
+    for i in range(out_seq_len):
+        mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
+        mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
+        # x_out: (batch_size, 1, out_chords_pool_size)
+        x_out, _ = up_tr((x_en, x_de, mask_padding, mask_lookahead))
+        # translate prediction to text
+        pred = tf.argmax(x_out, -1)  # (batch_size, 1)
+        x_de = tf.concat((x_de, chords_emb(pred[:, -1][:, tf.newaxis])), axis=1)
+        if return_str:
+            pred = [nid for nid in pred.numpy()[:, -1]]  # len = batch, take the last prediction
+            result.append([tk.index_word[pd + 1] for pd in pred])  # return chords string
+    if return_str:
+        return np.transpose(np.array(result, dtype=object), (1, 0))  # (batch, out_seq_len)
+    return x_de[:, 1:, :]  # (batch_size, out_seq_len, embed_dim)
+
+
+def extend_time(x_en, out_seq_len, time_features, up_tr):
+    # x_en: (batch_size, in_seq_len, time_features)
+    # up_tr: transformer.Transformer
+    batch_size = x_en.shape[0]
+    x_de = tf.zeros((batch_size, 1, time_features), dtype=tf.float32)  # (batch_size, 1, time_features)
+    for i in range(out_seq_len):
+        mask_padding = None  # util.padding_mask(x_en[:, :, 0])  # (batch, 1, 1, in_seq_len)
+        mask_lookahead = util.lookahead_mask(x_de.shape[1])  # (len(x_de_in), len(x_de_in))
+        # x_out: (batch_size, 1, out_chords_pool_size)
+        x_out, _ = up_tr((x_en, x_de, mask_padding, mask_lookahead))
+        x_de = tf.concat((x_de, x_out[:, -1][:, tf.newaxis]), axis=1)
+    return x_de[:, 1:, :]  # (batch_size, out_seq_len, time_features)
+
+
+def chords_synthesis_bloc(conv_in, style_in, noise, out_seq_len, strt_token_id,
+                          chords_emb, b_fc, g_fc, up_tr, n_cv1, activ, tk, return_str):
+    # conv_in: (batch, updated strt_dim, embed_dim)
+    # style_in: (batch, style_dim, 1)
+    # noise: (batch, embed_dim, 1)
+    # chords_emb: generator.ChordsEmbedder(chords_pool_size=out_chords_pool_size, max_pos=max_pos, embed_dim=embed_dim,
+    #                                      dropout_rate=embedding_dropout_rate)
+    # b_fc: tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='zeros')
+    # g_fc: tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='ones')
+    # up_tr: transformer.Transformer(
+    #             embed_dim=embed_dim, n_heads=n_heads, out_chords_pool_size=out_chords_pool_size,
+    #             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
+    #             norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation,
+    #             out_positive=False)
+    b = b_fc(tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
+    g = g_fc(tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
+    n = tf.transpose(n_cv1(noise), perm=(0, 2, 1))  # (batch, out_seq_len, embed_dim)
+    out = extend_chords(conv_in, out_seq_len, strt_token_id, chords_emb, up_tr,
+                        tk, return_str)  # (batch, out_seq_len, embed_dim)
+    if not return_str:
+        out = tf.add(out, n)  # (batch, out_seq_len, embed_dim)
+        out = generator.AdaInstanceNormalization()([out, b, g])  # (batch, out_seq_len, embed_dim)
+        out = activ(out)  # (batch, out_seq_len, embed_dim)
+
+    # b2 = b_fc1(tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
+    # g2 = g_fc1(tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, embed_dim)
+    # n2 = tf.transpose(n_cv1_1(noise), perm=(0, 2, 1))  # (batch, out_seq_len, embed_dim)
+    # out = extend_chords(out, out_seq_len, strt_token_id, chords_emb, up_tr1)  # (batch, out_seq_len, embed_dim)
+    # out = tf.add(out, n2)  # (batch, out_seq_len, embed_dim)
+    # out = generator.AdaInstanceNormalization()([out, b2, g2])  # (batch, out_seq_len, embed_dim)
+    # out = activ(out)  # (batch, out_seq_len, embed_dim)
+    return out
+
+
+def time_synthesis_bloc(conv_in, style_in, noise, out_seq_len, time_features,
+                        b_fc, g_fc, up_tr, n_cv1s, activ):
+    # conv_in: (batch, updated strt_dim, time_features)
+    # style_in: (batch, style_dim, 1)
+    # noise: (time_features, 1)
+
+    # b_fc: tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='zeros')
+    # g_fc: tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='ones')
+    # up_tr: transformer.Transformer(
+    #             embed_dim=embed_dim, n_heads=n_heads, out_chords_pool_size=out_chords_pool_size,
+    #             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
+    #             norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation,
+    #             out_positive=False)
+    b = b_fc(tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
+    g = g_fc(tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
+    n = tf.transpose(n_cv1s(noise), perm=(0, 2, 1))  # (batch, out_seq_len, time_features)
+    out = extend_time(conv_in, out_seq_len, time_features, up_tr)  # (batch, out_seq_len, time_features)
+    out = tf.add(out, n)  # (batch, out_seq_len, time_features)
+    out = generator.AdaInstanceNormalization()([out, b, g])  # (batch, out_seq_len, time_features)
+    out = activ(out)  # (batch, out_seq_len, time_features)
+
+    # b2 = b_fc1(tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
+    # g2 = g_fc1(tf.transpose(style_in, perm=(0, 2, 1)))  # (batch, 1, time_features)
+    # n2 = tf.transpose(n_cv1_1(noise), perm=(0, 2, 1))  # (batch, out_seq_len, time_features)
+    # out = extend_time(out, out_seq_len, time_features, up_tr)  # (batch, out_seq_len, time_features)
+    # out = tf.add(out, n2)  # (batch, out_seq_len, time_features)
+    # out = generator.AdaInstanceNormalization()([out, b2, g2])  # (batch, out_seq_len, time_features)
+    # out = activ(out)  # (batch, out_seq_len, time_features)
+    return out
+
+
+def synthsis_ch(nt_conv_in, nt_styl, batch_size, embed_dim, strt_token_id, out_seq_len_list,
+                chords_emb, ch_b_fcs, ch_g_fcs, ch_up_trs, ch_n_cv1s, activ, tk, return_str=False):
+    # nt_conv_in: (batch, strt_dim, embed_dim)
+    # nt_styl: (batch, style_dim, 1)
+    nt_conv_in_ = nt_conv_in
+    l = len(out_seq_len_list) - 1
+    i = 0
+    return_str_ = False
+    for sql, b_fc, g_fc, up_tr, n_cv1 in zip(out_seq_len_list, ch_b_fcs, ch_g_fcs, ch_up_trs, ch_n_cv1s):
+        # noise: (batch, embed_dim, 1)
+        noise = tf.random.normal((batch_size, embed_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
+        if return_str & (i == l):
+            return_str_ = True
+        nt_conv_in_ = chords_synthesis_bloc(nt_conv_in_, nt_styl, noise, sql, strt_token_id,
+                                            chords_emb, b_fc, g_fc, up_tr, n_cv1, activ, tk, return_str_)
+        i += 1
+    return nt_conv_in_  # (batch, out_seq_len_list[-1], embed_dim)
+
+
+def synthsis_tm(tm_conv_in, tm_styl, batch_size, time_features, out_seq_len_list,
+                tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s, activ):
+    # tm_conv_in: (batch, strt_dim, time_features)
+    # tm_styl: (batch, style_dim, 1)
+    tm_conv_in_ = tm_conv_in
+    for sql, b_fc, g_fc, up_tr, n_cv1 in zip(out_seq_len_list, tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s):
+        # noise: (batch, time_features, 1)
+        noise = tf.random.normal((batch_size, time_features, 1), mean=0, stddev=1.0, dtype=tf.float32)
+        tm_conv_in_ = time_synthesis_bloc(tm_conv_in_, tm_styl, noise, sql, time_features,
+                                          b_fc, g_fc, up_tr, n_cv1, activ)
+    return tm_conv_in_  # (batch, out_seq_len_list[-1], time_features)
+
+
+def generate_chords(batch_size, embed_dim, strt_token_id, const_ch, out_seq_len_list,
+                    style_dim, chords_style, chords_ini, chords_emb, ch_b_fcs, ch_g_fcs, ch_up_trs, ch_n_cv1s,
+                    activ, tk, out_midi=True):
+    ch_ltnt = tf.random.normal((batch_size, style_dim, 1))  # (batch, style_dim, 1)
+    nt_styl = chords_style(ch_ltnt)  # (batch, style_dim, 1)
+    nt_conv_in = syn_init_layer(const_ch, nt_styl, chords_ini)  # (batch, strt_dim, embed_dim)
+    chs = synthsis_ch(nt_conv_in, nt_styl, batch_size, embed_dim, strt_token_id, out_seq_len_list,
+                      chords_emb, ch_b_fcs, ch_g_fcs, ch_up_trs, ch_n_cv1s,
+                      activ, tk, return_str=True)  # (batch, out_seq_len_list[-1])  contains string
+    if out_midi:
+        # (batch, out_seq_len_list[-1], time_features)
+        tms = np.array([[[vel_norm, tmps_norm, dur_norm]] * out_seq_len_list[-1]] * batch_size)
+        # ary: (out_seq_len, out_seq_len_list[-1], 4)
+        ary = np.concatenate([chs[:, :, np.newaxis].astype(object), tms.astype(object)], axis=-1)
+        mids = []
+        for ary_i in ary:
+            ary_i = ary_i[(ary_i[:, 0] != '<start>') & (ary_i[:, 0] != '<end>')]
+            mid_i = preprocess.Conversion.arry2mid(ary_i)
+            mids.append(mid_i)
+        return mids
+    return chs
+
+
+def generate_time(batch_size, time_features, const_tm, out_seq_len_list,
+                  style_dim, time_style, time_ini, tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s,
+                  activ, out_midi=True):
+    tm_ltnt = tf.random.normal((batch_size, style_dim, 1))  # (batch, style_dim, 1)
+    tm_styl = time_style(tm_ltnt)  # (batch, style_dim, 1)
+    tm_conv_in = syn_init_layer(const_tm, tm_styl, time_ini)  # (batch, strt_dim, time_features)
+    tms = synthsis_tm(tm_conv_in, tm_styl, batch_size, time_features, out_seq_len_list,
+                      tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s, activ)  # (batch, out_seq_len_list[-1], time_features)
+    tms = abs(tms.numpy()) * np.array([vel_norm, tmps_norm, dur_norm])  # un-normalise
+    tms[:, 0] = np.clip(tms[:, 0], 0, 127)  # squeeze velocity within limit
+    if out_midi:
+        chs = np.array([[['64']] * out_seq_len_list[-1]] * batch_size)
+        # ary: (out_seq_len, out_seq_len_list[-1], 4)
+        ary = np.concatenate([chs.astype(object), abs(tms.astype(object))], axis=-1)
+        mids = []
+        for ary_i in ary:
+            mid_i = preprocess.Conversion.arry2mid(ary_i)
+            mids.append(mid_i)
+        return mids
+    return tms
+
+
+def generate_music(mode_, batch_size, embed_dim, style_dim, time_features, strt_token_id, const_ch, const_tm,
+                   out_seq_len_list, tk,
+                   chords_style, chords_ini, chords_emb, ch_b_fcs, ch_g_fcs, ch_up_trs, ch_n_cv1s, ch_activ,
+                   time_style, time_ini, tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s, tm_activ,
+                   out_midi=True):
+    if mode_ == 'chords':
+        return generate_chords(
+            batch_size, embed_dim, strt_token_id, const_ch, out_seq_len_list,
+            style_dim, chords_style, chords_ini, chords_emb, ch_b_fcs, ch_g_fcs, ch_up_trs, ch_n_cv1s,
+            ch_activ, tk, out_midi=out_midi)
+    if mode_ == 'time':
+        return generate_time(
+            batch_size, time_features, const_tm, out_seq_len_list,
+            style_dim, time_style, time_ini, tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s,
+            tm_activ, out_midi=out_midi)
+    # mode_ == 'both'
+    chs = generate_chords(
+            batch_size, embed_dim, strt_token_id, const_ch, out_seq_len_list,
+            style_dim, chords_style, chords_ini, chords_emb, ch_b_fcs, ch_g_fcs, ch_up_trs, ch_n_cv1s,
+            ch_activ, tk, out_midi=False)  # (batch, out_seq_len_list[-1])
+    tms = generate_time(
+        batch_size, time_features, const_tm, out_seq_len_list,
+        style_dim, time_style, time_ini, tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s,
+        tm_activ, out_midi=False)  # (batch, out_seq_len_list[-1], time_features)
+
+    ary = np.concatenate([chs[:, :, np.newaxis].astype(object), tms.astype(object)], axis=-1)
+    ary = ary[(ary[:, 0] != '<start>') & (ary[:, 0] != '<end>')]
+    if out_midi:
+        mids = []
+        for ary_i in ary:
+            mid_i = preprocess.Conversion.arry2mid(ary_i)
+            mids.append(mid_i)
+        return mids
+    return ary
 
 
 class GAN(tf.keras.models.Model):
@@ -41,14 +270,18 @@ class GAN(tf.keras.models.Model):
                  strt_dim=4, strt_token_id=15001, chords_pool_size=15002, chords_max_pos=800,
                  chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                  tmstl_fc_layers=4, tmstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
+
                  embedding_dropout_rate=0.2,
                  chsyn_kernel_size=3, chsyn_fc_activation="relu",
                  chsyn_encoder_layers=3, chsyn_decoder_layers=3, chsyn_fc_layers=3,
                  chsyn_norm_epsilon=1e-6, chsyn_transformer_dropout_rate=0.2,
                  chsyn_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
-                 tmsyn_kernel_size=3, tmsyn_fc_activation="relu", tmsyn_encoder_layers=3, tmsyn_decoder_layers=3,
+
+                 tmsyn_kernel_size=3, tmsyn_fc_activation="relu",
+                 tmsyn_encoder_layers=3, tmsyn_decoder_layers=3,
                  tmsyn_fc_layers=3, tmsyn_norm_epsilon=1e-6, tmsyn_transformer_dropout_rate=0.2,
                  tmsyn_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
+
                  d_kernel_size=3, d_encoder_layers=1, d_decoder_layers=1, d_fc_layers=3, d_norm_epsilon=1e-6,
                  d_transformer_dropout_rate=0.2, d_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
                  d_out_dropout=0.3, mode_='both'):
@@ -60,7 +293,7 @@ class GAN(tf.keras.models.Model):
         self.mode_ = mode_
         self.out_seq_len_list = out_seq_len_list
         self.embed_dim = embed_dim
-        self.time_features = time_features
+        self.time_features = time_features  # 3 for [velocity, velocity, time since last start, chords duration]
         self.in_dim = in_dim
         self.strt_dim = strt_dim
         self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
@@ -76,29 +309,42 @@ class GAN(tf.keras.models.Model):
         self.chords_style = generator.Mapping(fc_layers=chstl_fc_layers, activ=chstl_activ)
         self.time_style = generator.Mapping(fc_layers=tmstl_fc_layers, activ=tmstl_activ)
 
+        self.chords_ini = tf.keras.layers.Dense(embed_dim)
+        self.time_ini = tf.keras.layers.Dense(time_features)
+
         # chords embedder
-        self.chords_emb = generator.ChordsEmbedder(
-            chords_pool_size=chords_pool_size, max_pos=chords_max_pos,
-            embed_dim=embed_dim, dropout_rate=embedding_dropout_rate)
+        self.chords_emb = generator.ChordsEmbedder(chords_pool_size=chords_pool_size, max_pos=chords_max_pos,
+                                                   embed_dim=embed_dim, dropout_rate=embedding_dropout_rate)
 
         # chords generator
-        self.chords_syn = [generator.ChordsSythesisBlock(
-            embed_dim=embed_dim, strt_token_id=strt_token_id, out_seq_len=sql, kernel_size=chsyn_kernel_size,
-            out_chords_pool_size=chords_pool_size, n_heads=n_heads, max_pos=chords_max_pos,
-            fc_activation=chsyn_fc_activation, encoder_layers=chsyn_encoder_layers,
-            decoder_layers=chsyn_decoder_layers, fc_layers=chsyn_fc_layers, norm_epsilon=chsyn_norm_epsilon,
-            embedding_dropout_rate=embedding_dropout_rate,
-            transformer_dropout_rate=chsyn_transformer_dropout_rate, activ=chsyn_activ) for sql in out_seq_len_list] \
-            if mode_ in ['chords', 'both'] else None
+        self.ch_b_fcs = [tf.keras.layers.Dense(
+            embed_dim, kernel_initializer='he_normal', bias_initializer='zeros')
+            for _ in out_seq_len_list] if mode_ in ['chords', 'both'] else None
+        self.ch_g_fcs = [
+            tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='ones')
+            for _ in out_seq_len_list] if mode_ in ['chords', 'both'] else None
+        self.ch_n_cv1s = [tf.keras.layers.Conv1D(
+            sql, kernel_size=chsyn_kernel_size, padding='same', kernel_initializer='zeros', bias_initializer='zeros')
+            for sql in out_seq_len_list]
+        self.ch_up_trs = [transformer.Transformer(
+            embed_dim=embed_dim, n_heads=n_heads, out_chords_pool_size=chords_pool_size,
+            encoder_layers=chsyn_encoder_layers, decoder_layers=chsyn_decoder_layers, fc_layers=chsyn_fc_layers,
+            norm_epsilon=chsyn_norm_epsilon, dropout_rate=chsyn_transformer_dropout_rate, fc_activation=chsyn_activ,
+            out_positive=False) for _ in out_seq_len_list] if mode_ in ['chords', 'both'] else None
 
         # time generator
-        # 3 for [velocity, velocity, time since last start, chords duration]
-        self.time_syn = [generator.TimeSythesisBlock(
-            out_seq_len=sql, kernel_size=tmsyn_kernel_size, time_features=time_features,
-            fc_activation=tmsyn_fc_activation, encoder_layers=tmsyn_encoder_layers, decoder_layers=tmsyn_decoder_layers,
-            fc_layers=tmsyn_fc_layers, norm_epsilon=tmsyn_norm_epsilon,
-            transformer_dropout_rate=tmsyn_transformer_dropout_rate, activ=tmsyn_activ) for sql in out_seq_len_list] \
-            if mode_ in ['time', 'both'] else None
+        self.tm_b_fcs = [tf.keras.layers.Dense(time_features, kernel_initializer='he_normal', bias_initializer='zeros')
+                         for _ in out_seq_len_list] if mode_ in ['time', 'both'] else None
+        self.tm_g_fcs = [tf.keras.layers.Dense(time_features, kernel_initializer='he_normal', bias_initializer='ones')
+                         for _ in out_seq_len_list] if mode_ in ['time', 'both'] else None
+        self.tm_n_cv1s = [tf.keras.layers.Conv1D(
+            sql, kernel_size=tmsyn_kernel_size, padding='same', kernel_initializer='zeros', bias_initializer='zeros')
+            for sql in out_seq_len_list]
+        self.tm_up_trs = [transformer.Transformer(
+            embed_dim=time_features, n_heads=1, out_chords_pool_size=time_features,
+            encoder_layers=tmsyn_encoder_layers, decoder_layers=tmsyn_decoder_layers, fc_layers=tmsyn_fc_layers,
+            norm_epsilon=tmsyn_norm_epsilon, dropout_rate=tmsyn_transformer_dropout_rate, fc_activation=tmsyn_activ,
+            out_positive=True) for _ in out_seq_len_list] if mode_ in ['time', 'both'] else None
 
         # discriminator
         if self.mode_ == 'chords':
@@ -132,13 +378,17 @@ class GAN(tf.keras.models.Model):
             tk, self.out_seq_len_list[-1], step=step, batch_size=batch_size, vel_norm=vel_norm,
             tmps_norm=tmps_norm, dur_norm=dur_norm, pths=pths, name_substr_list=name_substr_list)
 
-    def load_model(self, const_path=const_path, chords_style_path=chords_style_path, time_style_path=time_style_path,
+    def load_model(self, const_path=const_path,
+
+
+                   chords_style_path=chords_style_path, time_style_path=time_style_path,
                    chords_emb_path=chords_emb_path, chords_extend_path=chords_extend_path,
                    time_extend_path=time_extend_path, chords_disc_path=chords_disc_path,
                    time_disc_path=time_disc_path, combine_disc_path=combine_disc_path,
                    train_ntlatent=True, train_tmlatent=True, train_ntemb=True,
                    train_ntgen=True, train_tmgen=True, train_disc=True, max_to_keep=5,
                    load_disc=False):
+        # ---------------------- constant --------------------------
         try:
             # const: (1, strt_dim, in_dim)
             const_ch = pkl.load(open(os.path.join(const_path, 'const_ch.pkl'), 'rb'))  # numpy array
@@ -146,10 +396,9 @@ class GAN(tf.keras.models.Model):
             print('Restored the latest const_ch')
         except:
             pass
-
         try:
             # const: (1, strt_dim, in_dim)
-            const_tm = pkl.load(open(os.path.join(const_path, 'const_ch.pkl'), 'rb'))  # numpy array
+            const_tm = pkl.load(open(os.path.join(const_path, 'const_tm.pkl'), 'rb'))  # numpy array
             self.const_tm = tf.Variable(const_tm, dtype=tf.float32)  # convert to variable
             print('Restored the latest const_tm')
         except:
@@ -234,6 +483,7 @@ class GAN(tf.keras.models.Model):
 
     def save_models(self, const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt,
                     save_time_extend, load_disc, save_disc):
+        # ---------------------- constant --------------------------
         pkl.dump(self.const_ch.numpy(), open(os.path.join(const_path, 'const_ch.pkl'), 'wb'))
         pkl.dump(self.const_tm.numpy(), open(os.path.join(const_path, 'const_tm.pkl'), 'wb'))
 
@@ -262,29 +512,6 @@ class GAN(tf.keras.models.Model):
             self.cp_manager_disc.save()
             print('Saved the latest discriminator for {}'.format(self.mode_))
 
-    def syn(self, nt_conv_in, nt_styl, tm_conv_in, tm_styl):
-        # nt_conv_in: (batch_size, strt_dim, embed_dim)
-        # tm_conv_in: (batch, strt_dim, time_features)
-        if self.mode_ in ['chords', 'both']:
-            for i in range(len(self.chords_syn)):
-                # nt_conv_in: (batch, updated strt_dim, embed_dim)
-                # nt_styl: (batch, style_dim, 1)
-                # noise: (batch, embed_dim, 1)
-                noise = tf.random.normal((self.batch_size, self.embed_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
-                nt_conv_in = self.chords_syn[i]((nt_conv_in, nt_styl, noise, self.chords_emb))
-        if self.mode_ in ['time', 'both']:
-            for i in range(len(self.time_syn)):
-                # tm_conv_in: (batch, updated strt_dim, time_features)
-                # tm_styl: (batch, style_dim, 1)
-                # noise: (batch, embed_dim, 1)
-                noise = tf.random.normal((self.batch_size, self.time_features, 1), mean=0, stddev=1.0, dtype=tf.float32)
-                tm_conv_in = self.time_syn[i]((tm_conv_in, tm_styl, noise))
-        if self.mode_ == 'both':
-            return nt_conv_in, tm_conv_in
-        if self.mode_ == 'chords':
-            return nt_conv_in
-        return tm_conv_in
-
     def train_discriminator(self, nt_ltnt, tm_ltnt, nts_tr, tms_tr, fake_mode=True):
         # nt_ltnt: (batch, in_dim, 1) np.array or None
         # tm_ltnt: (batch, in_dim, 1) np.array or None
@@ -300,16 +527,20 @@ class GAN(tf.keras.models.Model):
         nt_styl = self.chords_style(nt_ltnt) if self.mode_ in ['chords', 'both'] else None  # (batch, in_dim, 1)
         tm_styl = self.chords_style(tm_ltnt) if self.mode_ in ['time', 'both'] else None  # (batch, in_dim, 1)
         if self.mode_ == 'chords':
-            nt_conv_in = self.syn(self.consttile_ch, nt_styl, self.consttile_tm, tm_styl)
+            const_ch_ = self.syn_init(self.consttile_ch, nt_styl, how='chords')  # (batch, strt_dim, embed_dim)
+            nt_conv_in = self.syn(const_ch_, nt_styl, None, None)
         elif self.mode_ == 'time':
-            tm_conv_in = self.syn(self.consttile_ch, nt_styl, self.consttile_tm, tm_styl)
+            const_tm_ = self.syn_init(self.consttile_tm, tm_styl, how='time')  # (batch, strt_dim, time_features)
+            tm_conv_in = self.syn(None, None, const_tm_, tm_styl)
         else:  # self.mode_ == 'both'
-            nt_conv_in, tm_conv_in = syn(consttile_ch, nt_styl, consttile_tm, tm_styl)
+            const_ch_ = self.syn_init(self.consttile_ch, nt_styl, how='chords')  # (batch, strt_dim, embed_dim)
+            const_tm_ = self.syn_init(self.consttile_tm, tm_styl, how='time')  # (batch, strt_dim, time_features)
+            nt_conv_in, tm_conv_in = syn(const_ch_, nt_styl, const_tm_, tm_styl)
 
             #tm_conv_in = tf.ones((10, 4, 3))
             consttile_ch.shape
-            consttile_tm.shape
-            
+            nt_styl.shape
+
             init_nt_in = tf.matmul(consttile_ch, nt_styl)
             init_nt_in.shape
 
@@ -550,47 +781,12 @@ class GAN(tf.keras.models.Model):
 
             last_ep += 1
 
-    def generate_music(self):
-        if self.mode_ == 'chords':
-            nt_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.nt_ltnt_uniform \
-                else util.latant_vector(self.batch_size, self.in_dim, 1, mean_=0, std_=1.5)
-            nts = self.chords_style(nt_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
-            nts = self.chords_extend.predict_chords(nts, self.tk, self.out_seq_len, return_str=True)  # (1, in_seq_len)
-            tms = np.array([[self.vel_norm, self.tmps_norm, self.dur_norm]] * self.out_seq_len)[np.newaxis, :, :]
-        elif self.mode_ == 'time':
-            tm_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.tm_ltnt_uniform \
-                else util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0, std_=1.5)
-            tms = self.time_style(tm_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
-            tms = self.time_extend.predict_time(
-                tms, self.out_seq_len, vel_norm=self.vel_norm, tmps_norm=self.tmps_norm, dur_norm=self.dur_norm,
-                return_denorm=True)  # (1, in_seq_len, time_features)
-            nts = np.array([['64'] * self.out_seq_len])
-        else:  # self.mode_ == 'both'
-            nt_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.nt_ltnt_uniform \
-                else util.latant_vector(self.batch_size, self.in_dim, 1, mean_=0, std_=1.5)
-            nts = self.chords_style(nt_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
-            nts = self.chords_extend.predict_chords(nts, self.tk, self.out_seq_len, return_str=True)  # (1, in_seq_len)
-
-            tm_ltnt = np.random.uniform(-1.5, 1.5, (self.batch_size, self.in_dim, 1)) if self.tm_ltnt_uniform \
-                else util.latant_vector(self.batch_size, self.in_seq_len, 1, mean_=0, std_=1.5)
-            tms = self.time_style(tm_ltnt, self.const_tile)  # (1, strt_dim, fltr_size)
-            tms = self.time_extend.predict_time(
-                tms, self.out_seq_len, vel_norm=self.vel_norm, tmps_norm=self.tmps_norm, dur_norm=self.dur_norm,
-                return_denorm=True)  # (1, in_seq_len, time_features)
-            tms[:, 0] = np.clip(tms[:, 0], 0, 127)  # squeeze velocity within limit
-
-        ary = np.squeeze(np.concatenate([nts[:, :, np.newaxis], abs(tms)], axis=-1), axis=0)  # (out_seq_len, 4)
-        ary = ary[(ary[:, 0] != '<start>') & (ary[:, 0] != '<end>')]
-        mid = preprocess.Conversion.arry2mid(ary)
-        return mid
-
-
 
 
 # Todo: modify discriminator, get preout
 
 
-# Todo: use minibatch Minibatch discrimination (https://towardsdatascience.com/gan-ways-to-improve-gan-performance-acf37f9f59b)
+# Todo: use minibatch discrimination (https://towardsdatascience.com/gan-ways-to-improve-gan-performance-acf37f9f59b)
 # Todo: use tanh at the last layer of generator
 # Todo: schedule training like: if disc_loss > gen_loss ==> train gen, else train disc
 # Todo: use different loss function max(logD)
@@ -599,6 +795,7 @@ class GAN(tf.keras.models.Model):
 """
 out_seq_len_list=(8, 16, 32, 64)
 embed_dim=16
+n_heads=4
 in_dim=512
 time_features=3
 strt_dim=4
@@ -634,6 +831,7 @@ d_fc_layers=3
 d_norm_epsilon=1e-6
 d_transformer_dropout_rate=0.2
 d_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1)
+d_out_dropout=0.3
 
 
 custm_lr=True
