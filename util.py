@@ -9,10 +9,6 @@ tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
-# def latant_vector(n_samples, dim1, dim2, mean_=1.0, std_=0.5):
-#     return np.random.normal(mean_, std_, size=[n_samples, dim1, dim2])
-
-
 def padding_mask(x_):
     # pad position (pad with 0) = 1, non-pad position = 0
     # return shape: (batch, 1, 1, seq_len)
