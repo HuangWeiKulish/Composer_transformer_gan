@@ -1,10 +1,6 @@
 import os
-import glob
-import json
 import time
 import numpy as np
-import itertools
-import matplotlib.pyplot as plt
 import pickle as pkl
 import tensorflow as tf
 import util
@@ -221,12 +217,12 @@ def generate_chords(batch_size, embed_dim, strt_token_id, consttile_ch, out_seq_
     return chs
 
 
-def generate_time(batch_size, time_features, const_tm, out_seq_len_list,
+def generate_time(batch_size, time_features, consttile_tm, out_seq_len_list,
                   style_dim, time_style, time_ini, tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s,
                   activ, out_midi=True):
     tm_ltnt = tf.random.normal((batch_size, style_dim, 1))  # (batch, style_dim, 1)
     tm_styl = time_style(tm_ltnt)  # (batch, style_dim, 1)
-    tm_conv_in = syn_init_layer(const_tm, tm_styl, time_ini)  # (batch, strt_dim, time_features)
+    tm_conv_in = syn_init_layer(consttile_tm, tm_styl, time_ini)  # (batch, strt_dim, time_features)
     tms = synthsis_tm(tm_conv_in, tm_styl, batch_size, time_features, out_seq_len_list,
                       tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s, activ)  # (batch, out_seq_len_list[-1], time_features)
     tms = tms.numpy() * np.array([vel_norm, tmps_norm, dur_norm])  # un-normalise
@@ -243,7 +239,7 @@ def generate_time(batch_size, time_features, const_tm, out_seq_len_list,
     return tms
 
 
-def generate_music(mode_, batch_size, embed_dim, style_dim, time_features, strt_token_id, consttile_ch, const_tm,
+def generate_music(mode_, batch_size, embed_dim, style_dim, time_features, strt_token_id, consttile_ch, consttile_tm,
                    out_seq_len_list, tk,
                    chords_style, chords_ini, chords_emb, ch_b_fcs, ch_g_fcs, ch_up_trs, ch_n_cv1s, ch_activ,
                    time_style, time_ini, tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s, tm_activ,
@@ -255,7 +251,7 @@ def generate_music(mode_, batch_size, embed_dim, style_dim, time_features, strt_
             ch_activ, tk, out_midi=out_midi)
     if mode_ == 'time':
         return generate_time(
-            batch_size, time_features, const_tm, out_seq_len_list,
+            batch_size, time_features, consttile_tm, out_seq_len_list,
             style_dim, time_style, time_ini, tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s,
             tm_activ, out_midi=out_midi)
     # mode_ == 'both'
@@ -264,7 +260,7 @@ def generate_music(mode_, batch_size, embed_dim, style_dim, time_features, strt_
             style_dim, chords_style, chords_ini, chords_emb, ch_b_fcs, ch_g_fcs, ch_up_trs, ch_n_cv1s,
             ch_activ, tk, out_midi=False)  # (batch, out_seq_len_list[-1])
     tms = generate_time(
-        batch_size, time_features, const_tm, out_seq_len_list,
+        batch_size, time_features, consttile_tm, out_seq_len_list,
         style_dim, time_style, time_ini, tm_b_fcs, tm_g_fcs, tm_up_trs, tm_n_cv1s,
         tm_activ, out_midi=False)  # (batch, out_seq_len_list[-1], time_features)
 
@@ -380,16 +376,19 @@ class GAN(tf.keras.models.Model):
             for _ in self.out_seq_len_list] if self.mode_ in ['chords', 'both'] else None
 
     def init_syn_time(self):
-        self.tm_b_fcs = [tf.keras.layers.Dense(self.time_features, kernel_initializer='he_normal', bias_initializer='zeros')
-                         for _ in self.out_seq_len_list] if self.mode_ in ['time', 'both'] else None
-        self.tm_g_fcs = [tf.keras.layers.Dense(self.time_features, kernel_initializer='he_normal', bias_initializer='ones')
-                         for _ in self.out_seq_len_list] if self.mode_ in ['time', 'both'] else None
+        self.tm_b_fcs = [tf.keras.layers.Dense(
+            self.time_features, kernel_initializer='he_normal', bias_initializer='zeros')
+            for _ in self.out_seq_len_list] if self.mode_ in ['time', 'both'] else None
+        self.tm_g_fcs = [tf.keras.layers.Dense(
+            self.time_features, kernel_initializer='he_normal', bias_initializer='ones')
+            for _ in self.out_seq_len_list] if self.mode_ in ['time', 'both'] else None
         self.tm_n_cv1s = [tf.keras.layers.Conv1D(
             sql, kernel_size=self.tmsyn_kernel_size, padding='same', kernel_initializer='zeros', bias_initializer='zeros')
             for sql in self.out_seq_len_list]
         self.tm_up_trs = [transformer.Transformer(
             embed_dim=self.time_features, n_heads=1, out_chords_pool_size=self.time_features,
-            encoder_layers=self.tmsyn_encoder_layers, decoder_layers=self.tmsyn_decoder_layers, fc_layers=self.tmsyn_fc_layers,
+            encoder_layers=self.tmsyn_encoder_layers, decoder_layers=self.tmsyn_decoder_layers,
+            fc_layers=self.tmsyn_fc_layers,
             norm_epsilon=self.tmsyn_norm_epsilon, dropout_rate=self.tmsyn_transformer_dropout_rate,
             fc_activation=self.tmsyn_fc_activation)
             for _ in self.out_seq_len_list] if self.mode_ in ['time', 'both'] else None
@@ -465,7 +464,7 @@ class GAN(tf.keras.models.Model):
             self.callback_setting(
                 self.chords_style, self.optimizer_gen, 'chords_style', style_paths['chords'], max_to_keep)
             # chords sythesis
-            for i, sql in enumerate(out_seq_len_list):
+            for i, sql in enumerate(self.out_seq_len_list):
                 self.callback_setting(
                     self.ch_b_fcs[i], self.optimizer_gen,
                     'ch_b_fcs__{}'.format(sql), chords_syn_paths['ch_b_fcs'][sql], max_to_keep)
@@ -487,7 +486,7 @@ class GAN(tf.keras.models.Model):
             self.callback_setting(
                 self.time_style, self.optimizer_gen, 'time_style', style_paths['time'], max_to_keep)
             # time sythesis
-            for i, sql in enumerate(out_seq_len_list):
+            for i, sql in enumerate(self.out_seq_len_list):
                 self.callback_setting(
                     self.tm_b_fcs[i], self.optimizer_gen,
                     'tm_b_fcs__{}'.format(sql), time_syn_paths['tm_b_fcs'][sql], max_to_keep)
@@ -517,7 +516,7 @@ class GAN(tf.keras.models.Model):
             self.train_syn_ch = train_syn_ch
             util.model_trainable(self.chords_ini, trainable=train_chords_ini)
             util.model_trainable(self.chords_style, trainable=train_style_ch)
-            for i, sql in enumerate(out_seq_len_list):
+            for i, sql in enumerate(self.out_seq_len_list):
                 util.model_trainable(self.ch_b_fcs[i], trainable=train_syn_ch[sql])
                 util.model_trainable(self.ch_g_fcs[i], trainable=train_syn_ch[sql])
                 util.model_trainable(self.ch_n_cv1s[i], trainable=train_syn_ch[sql])
@@ -529,7 +528,7 @@ class GAN(tf.keras.models.Model):
             self.train_syn_tm = train_syn_tm
             util.model_trainable(self.time_ini, trainable=train_time_ini)
             util.model_trainable(self.time_style, trainable=train_style_tm)
-            for i, sql in enumerate(out_seq_len_list):
+            for i, sql in enumerate(self.out_seq_len_list):
                 util.model_trainable(self.tm_b_fcs[i], trainable=train_syn_tm[sql])
                 util.model_trainable(self.tm_g_fcs[i], trainable=train_syn_tm[sql])
                 util.model_trainable(self.tm_n_cv1s[i], trainable=train_syn_tm[sql])
@@ -545,7 +544,7 @@ class GAN(tf.keras.models.Model):
             pkl.dump(self.const_ch.numpy(), open(os.path.join(self.const_path, 'const_ch.pkl'), 'wb'))
             self.ckpt_managers['chords_ini'].save()
             self.ckpt_managers['chords_style'].save()
-            for sql in out_seq_len_list:
+            for sql in self.out_seq_len_list:
                 for nm in ['ch_b_fcs__{}'.format(sql), 'ch_g_fcs__{}'.format(sql), 'ch_n_cv1s__{}'.format(sql),
                            'ch_up_trs__{}'.format(sql)]:
                     self.ckpt_managers[nm].save()
@@ -554,7 +553,7 @@ class GAN(tf.keras.models.Model):
             pkl.dump(self.const_tm.numpy(), open(os.path.join(self.const_path, 'const_tm.pkl'), 'wb'))
             self.ckpt_managers['time_ini'].save()
             self.ckpt_managers['time_style'].save()
-            for sql in out_seq_len_list:
+            for sql in self.out_seq_len_list:
                 for nm in ['tm_b_fcs__{}'.format(sql), 'tm_g_fcs__{}'.format(sql), 'tm_n_cv1s__{}'.format(sql),
                            'tm_up_trs__{}'.format(sql)]:
                     self.ckpt_managers[nm].save()
@@ -608,6 +607,8 @@ class GAN(tf.keras.models.Model):
             else:  # self.mode_ == 'both'
                 d_inputs = chs_tr, tms_tr, de_in
             if self.recycle:
+                # pre_out: (batch, 1, in_dim)
+                # pred: (batch, 1)
                 pre_out, pred = self.disc(d_inputs, return_vec=True)
             else:  # recycle is False
                 pred = self.disc(d_inputs, return_vec=False)
@@ -644,7 +645,7 @@ class GAN(tf.keras.models.Model):
                 self.chords_emb, self.ch_b_fcs, self.ch_g_fcs, self.ch_up_trs, self.ch_n_cv1s,
                 self.chsyn_activ, tk=None, return_str=False)  # (batch, out_seq_len_list[-1], embed_dim)
             vbs += self.chords_emb.trainable_variables + self.chsyn_activ.trainable_variables
-            for i in range(len(out_seq_len_list)):
+            for i in range(len(self.out_seq_len_list)):
                 vbs += self.ch_b_fcs[i].trainable_variables + self.ch_g_fcs[i].trainable_variables + \
                        self.ch_up_trs[i].trainable_variables + self.ch_n_cv1s[i].trainable_variables
 
@@ -656,7 +657,7 @@ class GAN(tf.keras.models.Model):
                 self.tm_b_fcs, self.tm_g_fcs, self.tm_up_trs, self.tm_n_cv1s,
                 self.tmsyn_activ)  # (batch, out_seq_len_list[-1], time_features)
             vbs += self.tmsyn_activ.trainable_variables
-            for i in range(len(out_seq_len_list)):
+            for i in range(len(self.out_seq_len_list)):
                 vbs += self.tm_b_fcs[i].trainable_variables + self.tm_g_fcs[i].trainable_variables + \
                        self.tm_up_trs[i].trainable_variables + self.tm_n_cv1s[i].trainable_variables
 
@@ -705,48 +706,21 @@ class GAN(tf.keras.models.Model):
             self.optimizer_gen.apply_gradients(zip(gradients_gen, variables_gen))
             self.train_loss_gen(loss_gen)
 
-        # todo: train dynamically, if disc loss > g loss: train g, else train disc?????
-
         return loss_disc_tr, loss_disc_fk, loss_gen, pre_out
 
-    def train(self, epochs=10, save_model_step=1, save_sample_step=1,
-              print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5,
-              warmup_steps=1000, disc_lr=0.0001, gen_lr=0.1,
+    def train(self, tk, epochs=10, save_model_step=1, save_sample_step=1,
+              print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
               optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
-              result_path=result_path,
+              result_path=result_path, save_nsamples=3,
+              true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle=True):
 
-              train_disc=True,
-              # save_chords_ltnt=True, save_time_ltnt=True, save_chords_emb=True,
-              # save_chords_extend=True, save_time_extend=True, save_disc=True,
-              # load_disc=False,
-
-              true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1),
-              recycle=True):
-
-        log_current = {'epochs': 1, 'mode': self.mode_}
-        try:
-            log = json.load(open(os.path.join(result_path, 'log.json'), 'r'))
-            log_current['epochs'] = log[-1]['epochs']
-        except:
-            log = []
-        last_ep = log_current['epochs'] + 1
-
-        lr_gen = util.CustomSchedule(self.embed_dim, warmup_steps) if gen_lr is not None else gen_lr
-        self.optimizer_gen = optmzr(lr_gen) if self.mode_ == 'time' else optmzr(lr_gen)
+        self.optimizer_gen = optmzr(gen_lr)
         self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
         self.optimizer_disc = optmzr(disc_lr)
         self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
-
-        self.train_disc = train_disc
         self.true_label_smooth = true_label_smooth
         self.fake_label_smooth = fake_label_smooth
-
         self.recycle = recycle
-
-
-
-
-
 
         # consttile_ch: (batch, strt_dim, in_dim)
         self.consttile_ch = tf.tile(self.const_ch, tf.constant([self.batch_size, 1, 1], tf.int32))
@@ -794,12 +768,18 @@ class GAN(tf.keras.models.Model):
                             loss_disc_tr.numpy().mean()))
 
                 if (i + 1) % 500 == 0:
-                    self.save_models(const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt,
-                                     save_time_extend, load_disc, save_disc)
-                    mid = self.generate_music()
-                    file_name = os.path.join(result_path, self.mode_, 'ep{}_{}.mid'.format(last_ep, i+1))
-                    mid.save(file_name)
-                    print('Saved a fake sample: {}'.format(file_name))
+                    self.save_models()
+                    mids = generate_music(
+                        self.mode_, save_nsamples, self.embed_dim, self.style_dim, self.time_features,
+                        self.strt_token_id, self.consttile_ch, self.consttile_tm, self.out_seq_len_list, tk,
+                        self.chords_style, self.chords_ini, self.chords_emb,
+                        self.ch_b_fcs, self.ch_g_fcs, self.ch_up_trs, self.ch_n_cv1s, self.chsyn_activ,
+                        self.time_style, self.time_ini, self.tm_b_fcs, self.tm_g_fcs, self.tm_up_trs,
+                        self.tm_n_cv1s, self.tmsyn_activ, out_midi=True)
+                    for sp, mid in enumerate(mids):
+                        file_name = os.path.join(result_path, self.mode_, 'ep{}_{}_{}.mid'.format(epoch+1, i+1, sp))
+                        mid.save(file_name)
+                    print('Saved {} fake samples'.format(save_nsamples))
 
             if print_epoch:
                 if (epoch + 1) % print_epoch_step == 0:
@@ -807,23 +787,22 @@ class GAN(tf.keras.models.Model):
                         epoch+1, self.train_loss_gen.result(), self.train_loss_disc.result(), time.time()-start))
 
             if (epoch+1) % save_model_step == 0:
-                self.save_models(const_path, save_chords_ltnt, save_chords_emb, save_chords_extend, save_time_ltnt,
-                                 save_time_extend, load_disc, save_disc)
-                log_current['epochs'] += epoch + 1
-                log.append(log_current)
-                json.dump(log, open(os.path.join(result_path, 'log.json'), 'w'))
+                self.save_models()
 
             if (epoch+1) % save_sample_step == 0:
-                mid = self.generate_music()
-                file_name = os.path.join(result_path, self.mode_, 'ep{}_end.mid'.format(last_ep))
-                mid.save(file_name)
-                print('Saved a fake sample: {}'.format(file_name))
+                mids = generate_music(
+                    self.mode_, save_nsamples, self.embed_dim, self.style_dim, self.time_features,
+                    self.strt_token_id, self.consttile_ch, self.consttile_tm, self.out_seq_len_list, tk,
+                    self.chords_style, self.chords_ini, self.chords_emb,
+                    self.ch_b_fcs, self.ch_g_fcs, self.ch_up_trs, self.ch_n_cv1s, self.chsyn_activ,
+                    self.time_style, self.time_ini, self.tm_b_fcs, self.tm_g_fcs, self.tm_up_trs,
+                    self.tm_n_cv1s, self.tmsyn_activ, out_midi=True)
+                for sp, mid in enumerate(mids):
+                    file_name = os.path.join(result_path, self.mode_, 'ep{}_{}_{}.mid'.format(epoch+1, i + 1, sp))
+                    mid.save(file_name)
+                print('Saved {} fake samples'.format(save_nsamples))
 
-            last_ep += 1
 
-
-
-# Todo: modify discriminator, get preout
 
 
 # Todo: use minibatch discrimination (https://towardsdatascience.com/gan-ways-to-improve-gan-performance-acf37f9f59b)
