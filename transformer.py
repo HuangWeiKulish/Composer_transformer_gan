@@ -47,7 +47,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
 
 class Transformer(tf.keras.models.Model):
 
-    def __init__(self, embed_dim=16, n_heads=4, out_chords_pool_size=1000, encoder_layers=2, decoder_layers=2,
+    def __init__(self, embed_dim=16, n_heads=4, out_chords_pool_size=15002, encoder_layers=2, decoder_layers=2,
                  fc_layers=2, norm_epsilon=1e-6, dropout_rate=0.2, fc_activation="relu"):
         super(Transformer, self).__init__()
         assert embed_dim % n_heads == 0
@@ -62,23 +62,24 @@ class Transformer(tf.keras.models.Model):
 
         # layers for encoder -------------------------
         self.mha_en = [MultiheadAttention(n_heads, embed_dim) for i in range(encoder_layers)]
-        self.ln_en = tf.keras.layers.LayerNormalization(epsilon=norm_epsilon)
-        self.fc_en = tf.keras.models.Sequential(
+        self.ln1_en = [tf.keras.layers.LayerNormalization(epsilon=norm_epsilon) for i in range(encoder_layers)]
+        self.ln2_en = [tf.keras.layers.LayerNormalization(epsilon=norm_epsilon) for i in range(encoder_layers)]
+        self.fc_en = [tf.keras.models.Sequential(
             [tf.keras.layers.Dense(fc_layers, activation=fc_activation),
              tf.keras.layers.Dense(embed_dim),
-             tf.keras.layers.Dropout(dropout_rate)])
+             tf.keras.layers.Dropout(dropout_rate)]) for i in range(decoder_layers)]
 
         # layers for decoder -------------------------
         self.mha1_de = [MultiheadAttention(n_heads, embed_dim) for i in range(decoder_layers)]
-        self.ln1_de = tf.keras.layers.LayerNormalization(epsilon=norm_epsilon)
+        self.ln1_de = [tf.keras.layers.LayerNormalization(epsilon=norm_epsilon) for i in range(decoder_layers)]
         self.mha2_de = [MultiheadAttention(n_heads, embed_dim) for i in range(decoder_layers)]
-        self.ln2_de = tf.keras.layers.LayerNormalization(epsilon=norm_epsilon)
+        self.ln2_de = [tf.keras.layers.LayerNormalization(epsilon=norm_epsilon) for i in range(decoder_layers)]
 
-        self.fc_de = tf.keras.models.Sequential(
+        self.fc_de = [tf.keras.models.Sequential(
             [tf.keras.layers.Dense(fc_layers, activation=fc_activation),
              tf.keras.layers.Dense(embed_dim),
-             tf.keras.layers.Dropout(dropout_rate)])
-        self.ln3_de = tf.keras.layers.LayerNormalization(epsilon=norm_epsilon)
+             tf.keras.layers.Dropout(dropout_rate)]) for i in range(decoder_layers)]
+        self.ln3_de = [tf.keras.layers.LayerNormalization(epsilon=norm_epsilon) for i in range(decoder_layers)]
 
         # layer for output --------------------------
         self.final = tf.keras.layers.Dense(out_chords_pool_size)
@@ -113,11 +114,12 @@ class Transformer(tf.keras.models.Model):
         attention, att_weights = self.mha_en[i]((x_en, x_en, x_en), mask=mask_padding)
         attention = tf.keras.layers.Dropout(self.dropout_rate)(attention)  # (batch, time_in, embed_dim)
         skip_conn_1 = tf.keras.layers.Add()([x_en, attention])  # (batch, time_in, embed_dim)
-        skip_conn_1 = self.ln_en(skip_conn_1)  # (batch, time_in, embed_dim)
+        skip_conn_1 = self.ln1_en[i](skip_conn_1)  # (batch, time_in, embed_dim)
+
         # --------------------------- sub-layer 2 ---------------------------
-        fc = self.fc_en(skip_conn_1)  # (batch, time_in, embed_dim)
+        fc = self.fc_en[i](skip_conn_1)  # (batch, time_in, embed_dim)
         skip_conn_2 = tf.keras.layers.Add()([skip_conn_1, fc])  # (batch, time_in, embed_dim)
-        out = self.ln_en(skip_conn_2)  # (batch, time_in, embed_dim)
+        out = self.ln2_en[i](skip_conn_2)  # (batch, time_in, embed_dim)
         return out
 
     def transformer_decoder_block(self, x_de, en_out, mask_lookahead, mask_padding, i):
@@ -129,7 +131,7 @@ class Transformer(tf.keras.models.Model):
         attention_1, att_weights_1 = self.mha1_de[i]((x_de, x_de, x_de), mask=mask_lookahead)
         attention_1 = tf.keras.layers.Dropout(self.dropout_rate)(attention_1)  # (batch, de_time_in, embed_dim)
         skip_conn_1 = tf.keras.layers.Add()([x_de, attention_1])  # (batch, de_time_in, embed_dim)
-        skip_conn_1 = self.ln1_de(skip_conn_1)  # (batch, de_time_in, embed_dim)
+        skip_conn_1 = self.ln1_de[i](skip_conn_1)  # (batch, de_time_in, embed_dim)
 
         # --------------------------- sub-layer 2 ---------------------------
         # attention_2: (batch, time_in, embed_dim), att_weights_2: (batch, n_heads, length, length)
@@ -138,12 +140,12 @@ class Transformer(tf.keras.models.Model):
         attention_2, att_weights_2 = self.mha2_de[i]((skip_conn_1, en_out, en_out), mask=mask_padding)
         attention_2 = tf.keras.layers.Dropout(self.dropout_rate)(attention_2)  # (batch, de_time_in, embed_dim)
         skip_conn_2 = tf.keras.layers.Add()([attention_2, skip_conn_1])  # (batch, de_time_in, embed_dim)
-        skip_conn_2 = self.ln2_de(skip_conn_2)  # (batch, de_time_in, embed_dim)
+        skip_conn_2 = self.ln2_de[i](skip_conn_2)  # (batch, de_time_in, embed_dim)
 
         # --------------------------- sub-layer 3 ---------------------------
         # fc: (batch, de_time_in, embed_dim)
-        fc = self.fc_de(skip_conn_2)
+        fc = self.fc_de[i](skip_conn_2)
         skip_conn_3 = tf.keras.layers.Add()([fc, skip_conn_2])  # (batch, de_time_in, embed_dim)
-        out = self.ln3_de(skip_conn_3)  # (batch, de_time_in, embed_dim)
+        out = self.ln3_de[i](skip_conn_3)  # (batch, de_time_in, embed_dim)
         return out, att_weights_1, att_weights_2
 

@@ -47,6 +47,7 @@ class Mapping(tf.keras.layers.Layer):
         mean_ = tf.math.reduce_mean(x, axis=[1])
         std_ = tf.math.reduce_std(x, axis=[1]) + tf.constant([0.0001], dtype=tf.float32)
         out = (x - mean_[:, :, np.newaxis]) / std_[:, :, np.newaxis]
+        print('Mapping, out.shape', out.shape)
         out = self.fcs(out, training=training)  # (batch, in_dim, 1)
         return out
 
@@ -188,9 +189,9 @@ class ChordsExtendPretrain(tf.keras.models.Model):
             x_in_nt, x_tar_in_nt, x_tar_out_nt = \
                     chords_emb(x_in_nt), chords_emb(x_tar_in_nt), chords_emb(x_tar_out_nt)
 
-            # x_out_nt_pr: (batch, out_seq_len, out_chords_pool_size)
-            x_out_nt_pr, _ = self.chords_extend((x_in_nt, x_tar_in_nt, mask_padding, mask_lookahead))
-            loss_chords = util.loss_func_chords(x_tar_out[:, :, 0], x_out_nt_pr)
+            # x_out_ch_pr: (batch, out_seq_len, out_chords_pool_size)
+            x_out_ch_pr, _ = self.chords_extend((x_in_nt, x_tar_in_nt, mask_padding, mask_lookahead))
+            loss_chords = util.loss_func_chords(x_tar_out[:, :, 0], x_out_ch_pr)
             variables_chords = self.chords_emb.trainable_variables + self.chords_extend.trainable_variables
 
             gradients = tape.gradient(loss_chords, variables_chords)
@@ -302,7 +303,7 @@ class TimeExtendPretrain(tf.keras.models.Model):
             #  x_tar_in_tm: (batch, out_seq_len, 3)
             #  x_tar_out_tm: (batch, out_seq_len, 3)
             x_in_tm, x_tar_in_tm, x_tar_out_tm = x_in[:, :, 1:], x_tar_in[:, :, 1:], x_tar_out[:, :, 1:]
-            # x_out_nt_pr: (batch, out_seq_len, 3)
+            # x_out_ch_pr: (batch, out_seq_len, 3)
             x_out_tm_pr, _ = self.time_extend((x_in_tm, x_tar_in_tm, mask_padding, mask_lookahead))
             # the ending value is 0, remove from loss calcultion
             loss_time = util.loss_func_time(x_tar_out_tm[:, :-1, :], x_out_tm_pr[:, :-1, :])

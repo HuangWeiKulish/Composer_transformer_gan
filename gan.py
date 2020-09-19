@@ -625,8 +625,8 @@ class GAN(tf.keras.models.Model):
         return pre_out, loss_disc, self.disc.trainable_variables
 
     def train_generator(self, ch_ltnt, tm_ltnt):
-        # ch_ltnt: (batch * 2, in_seq_len, 16)
-        # tm_ltnt: (batch * 2, in_seq_len, 1)
+        # ch_ltnt: (batch, in_seq_len, 16)
+        # tm_ltnt: (batch, in_seq_len, 1)
 
         # freeze discriminator
         if self.train_disc:
@@ -636,7 +636,6 @@ class GAN(tf.keras.models.Model):
             if self.mode_ in ['chords', 'both'] \
             else tf.constant([[[0] * self.time_features]] * self.batch_size, dtype=tf.float32)
         vbs = []
-
         if self.mode_ in ['chords', 'both']:
             ch_styl = self.chords_style(ch_ltnt)  # (batch, style_dim, 1)
             ch_conv_in = syn_init_layer(self.consttile_ch, ch_styl, self.chords_ini)  # (batch, strt_dim, embed_dim)
@@ -670,15 +669,15 @@ class GAN(tf.keras.models.Model):
         pred = self.disc(d_inputs, return_vec=False)  # (batch, 1)
 
         # label flipping with no label smoothing
-        lbls = tf.ones((self.batch_size * 2, 1), dtype=tf.float32)  # (batch * 2, 1)
+        lbls = tf.ones((self.batch_size, 1), dtype=tf.float32)  # (batch, 1)
         loss_gen = tf.keras.losses.binary_crossentropy(lbls, pred, from_logits=False, label_smoothing=0)
         return loss_gen, vbs
 
     def train_step(self, inputs):
         # ch_ltnt: (batch, in_dim, 1)
         # tm_ltnt: (batch, in_dim, 1)
-        # ch_ltnt2: (batch * 2, in_dim, 1)
-        # tm_ltnt2: (batch * 2, in_dim, 1)
+        # ch_ltnt2: (batch, in_dim, 1)
+        # tm_ltnt2: (batch, in_dim, 1)
         # chs_tr: true sample chords (batch, in_seq_len)
         # tms_tr: true sample time (batch, in_seq_len, time_features)
         ch_ltnt, tm_ltnt, ch_ltnt2, tm_ltnt2, chs_tr, tms_tr = inputs
@@ -752,10 +751,10 @@ class GAN(tf.keras.models.Model):
                 # tm_ltnt: (batch, in_dim, 1)
                 tm_ltnt = pre_out if recycle & (pre_out is not None) \
                     else tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
-                # nt_ltnt2: (batch * 2, in_dim, 1)
-                nt_ltnt2 = tf.random.normal((self.batch_size * 2, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
-                # tm_ltnt2: (batch * 2, in_dim, 1)
-                tm_ltnt2 = tf.random.normal((self.batch_size * 2, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
+                # nt_ltnt2: (batch, in_dim, 1)
+                nt_ltnt2 = tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
+                # tm_ltnt2: (batch, in_dim, 1)
+                tm_ltnt2 = tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
 
                 loss_disc_tr, loss_disc_fk, loss_gen, pre_out = self.train_step(
                     (nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, chs_tr, tms_tr))

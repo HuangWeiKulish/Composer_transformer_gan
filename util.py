@@ -114,6 +114,9 @@ def loss_func_time(real, pred):
 
 
 def model_trainable(model, trainable=True):
-    for layer in model.layers:
-        layer.trainable = trainable
+    try:
+        model.trainable = trainable
+    except:
+        for layer in model.layers:
+            layer.trainable = trainable
 

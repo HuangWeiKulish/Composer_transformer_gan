@@ -1,11 +1,9 @@
-import os
-import numpy as np
 import util
 import generator
 import tensorflow as tf
 import json
 import pickle as pkl
-import preprocess
+
 tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
@@ -93,7 +91,7 @@ dataset = util.load_true_data_pretrain_gen(
     vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
     pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
 
-time_ext = generator.TimeExtend(
+time_ext = generator.TimeExtendPretrain(
     time_features=3, fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6,
     transformer_dropout_rate=0.2)
 
