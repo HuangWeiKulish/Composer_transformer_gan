@@ -337,7 +337,8 @@ class GAN(tf.keras.models.Model):
         # ---------------------------------- layers ----------------------------------
         if self.mode_ != 'time':
             # constant layer init: const_ch: (1, strt_dim, in_dim)
-            self.const_ch = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32)
+            self.const_ch = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32,
+                                        trainable=True, name='const_ch')
             # chords embedder
             self.chords_emb = generator.ChordsEmbedder(
                 chords_pool_size=chords_pool_size, max_pos=chords_max_pos, embed_dim=embed_dim,
@@ -351,7 +352,8 @@ class GAN(tf.keras.models.Model):
 
         if self.mode_ != 'chords':
             # constant layer init: const_tm: (1, strt_dim, in_dim)
-            self.const_tm = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32)
+            self.const_tm = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32,
+                                        trainable=True, name='const_tm')
             # style generator
             self.time_style = generator.Mapping(fc_layers=tmstl_fc_layers, activ=tmstl_activ)
             # initial layer of synthesis networks
@@ -445,14 +447,14 @@ class GAN(tf.keras.models.Model):
         try:
             # const: (1, strt_dim, in_dim)
             const_ch = pkl.load(open(os.path.join(const_path, 'const_ch.pkl'), 'rb'))  # numpy array
-            self.const_ch = tf.Variable(const_ch, dtype=tf.float32)  # convert to variable
+            self.const_ch = tf.Variable(const_ch, dtype=tf.float32, trainable=True, name='const_ch')  # convert to variable
             print('Restored the latest const_ch')
         except:
             pass
         try:
             # const: (1, strt_dim, in_dim)
             const_tm = pkl.load(open(os.path.join(const_path, 'const_tm.pkl'), 'rb'))  # numpy array
-            self.const_tm = tf.Variable(const_tm, dtype=tf.float32)  # convert to variable
+            self.const_tm = tf.Variable(const_tm, dtype=tf.float32, trainable=True, name='const_tm')  # convert to variable
             print('Restored the latest const_tm')
         except:
             pass
@@ -580,14 +582,16 @@ class GAN(tf.keras.models.Model):
         if fake_mode:
             if self.mode_ != 'time':
                 ch_styl = self.chords_style(ch_ltnt)  # (batch, style_dim, 1)
-                ch_conv_in = syn_init_layer(self.consttile_ch, ch_styl, self.chords_ini)  # (batch, strt_dim, embed_dim)
+                ch_conv_in = syn_init_layer(tf.tile(self.const_ch, tf.constant([self.batch_size, 1, 1], tf.int32)),
+                                            ch_styl, self.chords_ini)  # (batch, strt_dim, embed_dim)
                 chs_fk = synthsis_ch(
                     ch_conv_in, ch_styl, self.batch_size, self.embed_dim, self.strt_token_id, self.out_seq_len_list,
                     self.chords_emb, self.ch_b_fcs, self.ch_g_fcs, self.ch_up_trs, self.ch_n_cv1s,
                     self.chsyn_activ, tk=None, return_str=False)  # (batch, out_seq_len_list[-1], embed_dim)
             if self.mode_ != 'chords':
                 tm_styl = self.time_style(tm_ltnt)  # (batch, style_dim, 1)
-                tm_conv_in = syn_init_layer(self.const_tm, tm_styl, self.time_ini)  # (batch, strt_dim, time_features)
+                tm_conv_in = syn_init_layer(tf.tile(self.const_tm, tf.constant([self.batch_size, 1, 1], tf.int32)),
+                                            tm_styl, self.time_ini)  # (batch, strt_dim, time_features)
                 tms_fk = synthsis_tm(
                     tm_conv_in, tm_styl, self.batch_size, self.time_features, self.out_seq_len_list,
                     self.tm_b_fcs, self.tm_g_fcs, self.tm_up_trs, self.tm_n_cv1s,
@@ -640,26 +644,29 @@ class GAN(tf.keras.models.Model):
             if self.mode_ != 'time' \
             else tf.constant([[[0] * self.time_features]] * self.batch_size, dtype=tf.float32)
         vbs = []
+
         if self.mode_ != 'time':
             ch_styl = self.chords_style(ch_ltnt)  # (batch, style_dim, 1)
-            ch_conv_in = syn_init_layer(self.consttile_ch, ch_styl, self.chords_ini)  # (batch, strt_dim, embed_dim)
+            ch_conv_in = syn_init_layer(tf.tile(self.const_ch, tf.constant([self.batch_size, 1, 1], tf.int32)), ch_styl,
+                                        self.chords_ini)  # (batch, strt_dim, embed_dim)
             chs_fk = synthsis_ch(
                 ch_conv_in, ch_styl, self.batch_size, self.embed_dim, self.strt_token_id, self.out_seq_len_list,
                 self.chords_emb, self.ch_b_fcs, self.ch_g_fcs, self.ch_up_trs, self.ch_n_cv1s,
                 self.chsyn_activ, tk=None, return_str=False)  # (batch, out_seq_len_list[-1], embed_dim)
-            vbs += self.chords_emb.trainable_variables + self.chsyn_activ.trainable_variables
+            vbs += self.chords_emb.trainable_variables + self.chsyn_activ.trainable_variables + [self.const_ch]
             for i in range(len(self.out_seq_len_list)):
                 vbs += self.ch_b_fcs[i].trainable_variables + self.ch_g_fcs[i].trainable_variables + \
                        self.ch_up_trs[i].trainable_variables + self.ch_n_cv1s[i].trainable_variables
 
         if self.mode_ != 'chords':
             tm_styl = self.time_style(tm_ltnt)  # (batch, style_dim, 1)
-            tm_conv_in = syn_init_layer(self.const_tm, tm_styl, self.time_ini)  # (batch, strt_dim, time_features)
+            tm_conv_in = syn_init_layer(tf.tile(self.const_tm, tf.constant([self.batch_size, 1, 1], tf.int32)),
+                                        tm_styl, self.time_ini)  # (batch, strt_dim, time_features)
             tms_fk = synthsis_tm(
                 tm_conv_in, tm_styl, self.batch_size, self.time_features, self.out_seq_len_list,
                 self.tm_b_fcs, self.tm_g_fcs, self.tm_up_trs, self.tm_n_cv1s,
                 self.tmsyn_activ)  # (batch, out_seq_len_list[-1], time_features)
-            vbs += self.tmsyn_activ.trainable_variables
+            vbs += self.tmsyn_activ.trainable_variables + [self.const_tm]
             for i in range(len(self.out_seq_len_list)):
                 vbs += self.tm_b_fcs[i].trainable_variables + self.tm_g_fcs[i].trainable_variables + \
                        self.tm_up_trs[i].trainable_variables + self.tm_n_cv1s[i].trainable_variables
@@ -725,13 +732,6 @@ class GAN(tf.keras.models.Model):
         self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
         self.true_label_smooth = true_label_smooth
         self.fake_label_smooth = fake_label_smooth
-
-        if self.mode_ != 'time':
-            # consttile_ch: (batch, strt_dim, in_dim)
-            self.consttile_ch = tf.tile(self.const_ch, tf.constant([self.batch_size, 1, 1], tf.int32))
-        if self.mode_ != 'chords':
-            # consttile_tm: (batch, strt_dim, in_dim)
-            self.consttile_tm = tf.tile(self.const_tm, tf.constant([self.batch_size, 1, 1], tf.int32))
 
         pre_out = None
 
@@ -802,10 +802,12 @@ class GAN(tf.keras.models.Model):
                 print('Saved {} fake samples'.format(save_nsamples))
 
     def gen_music(self, save_nsamples, tk):
+
         if self.mode_ != 'time':
             consttile_ch_, chords_style_, chords_ini_, chords_emb_, \
             ch_b_fcs_, ch_g_fcs_, ch_up_trs_, ch_n_cv1s_, chsyn_activ_ = \
-                self.consttile_ch[:save_nsamples, :, :], self.chords_style, self.chords_ini, self.chords_emb, \
+                tf.tile(self.const_ch, tf.constant([save_nsamples, 1, 1], tf.int32)), \
+                self.chords_style, self.chords_ini, self.chords_emb, \
                 self.ch_b_fcs, self.ch_g_fcs, self.ch_up_trs, self.ch_n_cv1s, self.chsyn_activ
         else:
             consttile_ch_, chords_style_, chords_ini_, chords_emb_, \
@@ -814,7 +816,8 @@ class GAN(tf.keras.models.Model):
         if self.mode_ != 'chords':
             consttile_tm_, time_style_, time_ini_, tm_b_fcs_, tm_g_fcs_, \
             tm_up_trs_, tm_n_cv1s_, tmsyn_activ_ = \
-                self.consttile_tm[:save_nsamples, :, :], self.time_style, self.time_ini, self.tm_b_fcs, self.tm_g_fcs, \
+                tf.tile(self.const_tm, tf.constant([save_nsamples, 1, 1], tf.int32)), \
+                self.time_style, self.time_ini, self.tm_b_fcs, self.tm_g_fcs, \
                 self.tm_up_trs, self.tm_n_cv1s, self.tmsyn_activ
         else:
             consttile_tm_, time_style_, time_ini_, tm_b_fcs_, tm_g_fcs_, \
