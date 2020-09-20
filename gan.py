@@ -336,7 +336,7 @@ class GAN(tf.keras.models.Model):
         self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
 
         # ---------------------------------- layers ----------------------------------
-        if self.mode_ in ['chords', 'both']:
+        if self.mode_ != 'time':
             # constant layer init: const_ch: (1, strt_dim, in_dim)
             self.const_ch = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32)
             # chords embedder
@@ -346,11 +346,11 @@ class GAN(tf.keras.models.Model):
             # style generator
             self.chords_style = generator.Mapping(fc_layers=chstl_fc_layers, activ=chstl_activ)
             # initial layer of synthesis networks
-            self.chords_ini = tf.keras.layers.Dense(embed_dim) if self.mode_ in ['chords', 'both'] else None
+            self.chords_ini = tf.keras.layers.Dense(embed_dim) if self.mode_ != 'time' else None
             # synthesis networks
             self.init_syn_chords()
 
-        if self.mode_ in ['time', 'both']:
+        if self.mode_ != 'chords':
             # constant layer init: const_tm: (1, strt_dim, in_dim)
             self.const_tm = tf.Variable(np.ones((1, strt_dim, in_dim)), dtype=tf.float32)
             # style generator
@@ -459,7 +459,7 @@ class GAN(tf.keras.models.Model):
             pass
 
         # ---------------------- call back setting --------------------------
-        if self.mode_ in ['chords', 'both']:
+        if self.mode_ != 'time':
             # chords embedder
             self.callback_setting(
                 self.chords_emb, self.optimizer_gen, 'chords_emb', chords_emb_path, max_to_keep)
@@ -484,7 +484,7 @@ class GAN(tf.keras.models.Model):
                     self.ch_up_trs[i], self.optimizer_gen,
                     'ch_up_trs__{}'.format(sql), chords_syn_paths['ch_up_trs'][sql], max_to_keep)
 
-        if self.mode_ in ['time', 'both']:
+        if self.mode_ != 'chords':
             # initial layers
             self.callback_setting(
                 self.time_ini, self.optimizer_gen, 'time_ini', ini_layer_path['time'], max_to_keep)
@@ -513,7 +513,7 @@ class GAN(tf.keras.models.Model):
     def set_trainable(self, train_emb=True, train_chords_ini=True, train_time_ini=True,
                       train_style_ch=True, train_style_tm=True, train_syn_ch={k: True for k in out_seq_len_list},
                       train_syn_tm={k: True for k in out_seq_len_list}, train_disc=True):
-        if self.mode_ in ['chords', 'both']:
+        if self.mode_ != 'time':
             self.train_emb = train_emb
             util.model_trainable(self.chords_emb, trainable=train_emb)
             self.train_chords_ini = train_chords_ini
@@ -527,7 +527,7 @@ class GAN(tf.keras.models.Model):
                 util.model_trainable(self.ch_n_cv1s[i], trainable=train_syn_ch[sql])
                 util.model_trainable(self.ch_up_trs[i], trainable=train_syn_ch[sql])
 
-        if self.mode_ in ['time', 'both']:
+        if self.mode_ != 'chords':
             self.train_time_ini = train_time_ini
             self.train_style_tm = train_style_tm
             self.train_syn_tm = train_syn_tm
@@ -543,7 +543,7 @@ class GAN(tf.keras.models.Model):
         util.model_trainable(self.disc, trainable=train_disc)
 
     def save_models(self):
-        if self.mode_ in ['chords', 'both']:
+        if self.mode_ != 'time':
             pkl.dump(self.const_ch.numpy(), open(os.path.join(self.const_path, 'const_ch.pkl'), 'wb'))
             self.ckpt_managers['chords_emb'].save()
             self.ckpt_managers['chords_ini'].save()
@@ -553,7 +553,7 @@ class GAN(tf.keras.models.Model):
                            'ch_up_trs__{}'.format(sql)]:
                     self.ckpt_managers[nm].save()
 
-        if self.mode_ in ['time', 'both']:
+        if self.mode_ != 'chords':
             pkl.dump(self.const_tm.numpy(), open(os.path.join(self.const_path, 'const_tm.pkl'), 'wb'))
             self.ckpt_managers['time_ini'].save()
             self.ckpt_managers['time_style'].save()
@@ -575,18 +575,18 @@ class GAN(tf.keras.models.Model):
 
         # (batch, 1, embed_dim) or (batch, 1, time_features)
         de_in = self.chords_emb(tf.constant([[self.strt_token_id]] * self.batch_size, dtype=tf.float32)) \
-            if self.mode_ in ['chords', 'both'] \
+            if self.mode_ != 'time' \
             else tf.constant([[[0] * self.time_features]] * self.batch_size, dtype=tf.float32)
 
         if fake_mode:
-            if self.mode_ in ['chords', 'both']:
+            if self.mode_ != 'time':
                 ch_styl = self.chords_style(ch_ltnt)  # (batch, style_dim, 1)
                 ch_conv_in = syn_init_layer(self.consttile_ch, ch_styl, self.chords_ini)  # (batch, strt_dim, embed_dim)
                 chs_fk = synthsis_ch(
                     ch_conv_in, ch_styl, self.batch_size, self.embed_dim, self.strt_token_id, self.out_seq_len_list,
                     self.chords_emb, self.ch_b_fcs, self.ch_g_fcs, self.ch_up_trs, self.ch_n_cv1s,
                     self.chsyn_activ, tk=None, return_str=False)  # (batch, out_seq_len_list[-1], embed_dim)
-            if self.mode_ in ['time', 'both']:
+            if self.mode_ != 'chords':
                 tm_styl = self.time_style(tm_ltnt)  # (batch, style_dim, 1)
                 tm_conv_in = syn_init_layer(self.const_tm, tm_styl, self.time_ini)  # (batch, strt_dim, time_features)
                 tms_fk = synthsis_tm(
@@ -638,10 +638,10 @@ class GAN(tf.keras.models.Model):
             util.model_trainable(self.disc, trainable=False)
 
         de_in = self.chords_emb(tf.constant([[self.strt_token_id]] * self.batch_size, dtype=tf.float32)) \
-            if self.mode_ in ['chords', 'both'] \
+            if self.mode_ != 'time' \
             else tf.constant([[[0] * self.time_features]] * self.batch_size, dtype=tf.float32)
         vbs = []
-        if self.mode_ in ['chords', 'both']:
+        if self.mode_ != 'time':
             ch_styl = self.chords_style(ch_ltnt)  # (batch, style_dim, 1)
             ch_conv_in = syn_init_layer(self.consttile_ch, ch_styl, self.chords_ini)  # (batch, strt_dim, embed_dim)
             chs_fk = synthsis_ch(
@@ -653,7 +653,7 @@ class GAN(tf.keras.models.Model):
                 vbs += self.ch_b_fcs[i].trainable_variables + self.ch_g_fcs[i].trainable_variables + \
                        self.ch_up_trs[i].trainable_variables + self.ch_n_cv1s[i].trainable_variables
 
-        if self.mode_ in ['time', 'both']:
+        if self.mode_ != 'chords':
             tm_styl = self.time_style(tm_ltnt)  # (batch, style_dim, 1)
             tm_conv_in = syn_init_layer(self.const_tm, tm_styl, self.time_ini)  # (batch, strt_dim, time_features)
             tms_fk = synthsis_tm(
@@ -726,10 +726,12 @@ class GAN(tf.keras.models.Model):
         self.fake_label_smooth = fake_label_smooth
         self.recycle = recycle
 
-        # consttile_ch: (batch, strt_dim, in_dim)
-        self.consttile_ch = tf.tile(self.const_ch, tf.constant([self.batch_size, 1, 1], tf.int32))
-        # consttile_tm: (batch, strt_dim, in_dim)
-        self.consttile_tm = tf.tile(self.const_tm, tf.constant([self.batch_size, 1, 1], tf.int32))
+        if self.mode_ != 'time':
+            # consttile_ch: (batch, strt_dim, in_dim)
+            self.consttile_ch = tf.tile(self.const_ch, tf.constant([self.batch_size, 1, 1], tf.int32))
+        if self.mode_ != 'chords':
+            # consttile_tm: (batch, strt_dim, in_dim)
+            self.consttile_tm = tf.tile(self.const_tm, tf.constant([self.batch_size, 1, 1], tf.int32))
 
         pre_out = None
 
@@ -814,7 +816,7 @@ class GAN(tf.keras.models.Model):
             tm_up_trs_, tm_n_cv1s_, tmsyn_activ_ = None, None, None, None, None, None, None, None
 
         mids = generate_music(
-            self.mode_, save_nsamples, self.embed_dim, self.style_dim, self.time_features,
+            self.mode_, save_nsamples, self.embed_dim, self.in_dim, self.time_features,
             self.strt_token_id, consttile_ch_, consttile_tm_, self.out_seq_len_list, tk, chords_style_,
             chords_ini_, chords_emb_, ch_b_fcs_, ch_g_fcs_, ch_up_trs_, ch_n_cv1s_, chsyn_activ_,
             time_style_, time_ini_, tm_b_fcs_, tm_g_fcs_, tm_up_trs_, tm_n_cv1s_, tmsyn_activ_,

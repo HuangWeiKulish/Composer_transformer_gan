@@ -47,7 +47,6 @@ class Mapping(tf.keras.layers.Layer):
         mean_ = tf.math.reduce_mean(x, axis=[1])
         std_ = tf.math.reduce_std(x, axis=[1]) + tf.constant([0.0001], dtype=tf.float32)
         out = (x - mean_[:, :, np.newaxis]) / std_[:, :, np.newaxis]
-        print('Mapping, out.shape', out.shape)
         out = self.fcs(out, training=training)  # (batch, in_dim, 1)
         return out
 

@@ -99,7 +99,7 @@ gan_model = GAN(out_seq_len_list=out_seq_len_list, embed_dim=embed_dim, time_fea
                 d_out_dropout=d_out_dropout)
 
 gan_model.load_true_samples(tk, step=60, batch_size=50, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
-                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['noc'])  # todo!!
+                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])  # todo!!
 
 gan_model.load_model(const_path=const_path, chords_emb_path=chords_emb_path, ini_layer_path=ini_layer_path,
                      style_paths=style_paths, chords_syn_paths=chords_syn_paths, time_syn_paths=time_syn_paths,
@@ -115,7 +115,7 @@ gan_model.train(tk, epochs=10, save_model_step=1, save_sample_step=1, print_batc
                 print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
                 result_path=result_path, save_nsamples=3,
-                true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle=True)
+                true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle=True)  # todo!!
 
 #gan_model.disc
 # train on chords latent -------------------------------------------------
