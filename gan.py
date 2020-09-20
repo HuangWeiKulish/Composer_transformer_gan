@@ -50,7 +50,6 @@ tk = pkl.load(open(tk_path, 'rb'))
 
 
 def syn_init_layer(consttile, styl, ini_layer):
-    # how in ['chords', 'time']
     # consttile: (batch, strt_dim, in_dim)
     # styl: (batch, in_dim, 1)
     # ini_layer: tf.keras.layers.Dense
@@ -564,7 +563,7 @@ class GAN(tf.keras.models.Model):
 
         self.ckpt_managers['disc__{}'.format(self.mode_)].save()
 
-    def train_discriminator(self, ch_ltnt, tm_ltnt, chs_tr, tms_tr, fake_mode=True):
+    def train_discriminator(self, ch_ltnt, tm_ltnt, chs_tr, tms_tr, fake_mode=True, to_recycle=True):
         # ch_ltnt: (batch, in_dim, 1) np.array or None
         # tm_ltnt: (batch, in_dim, 1) np.array or None
         # chs_tr: true sample chords (batch, in_seq_len) np.array or None
@@ -611,7 +610,7 @@ class GAN(tf.keras.models.Model):
             else:  # self.mode_ == 'both'
                 chs_tr = self.chords_emb(chs_tr)  # (batch, out_seq_len_list[-1], embed_dim)
                 d_inputs = chs_tr, tms_tr, de_in
-            if self.recycle:
+            if to_recycle:
                 # pre_out: (batch, in_dim, 1)
                 # pred: (batch, 1)
                 pre_out, pred = self.disc(d_inputs, return_vec=True)
@@ -678,7 +677,7 @@ class GAN(tf.keras.models.Model):
         loss_gen = tf.keras.losses.binary_crossentropy(lbls, pred, from_logits=False, label_smoothing=0)
         return loss_gen, vbs
 
-    def train_step(self, inputs):
+    def train_step(self, inputs, to_recycle=True):
         # ch_ltnt: (batch, in_dim, 1)
         # tm_ltnt: (batch, in_dim, 1)
         # ch_ltnt2: (batch, in_dim, 1)
@@ -690,7 +689,7 @@ class GAN(tf.keras.models.Model):
         # Step 1. train discriminator on true samples --------------------
         with tf.GradientTape() as tape:
             pre_out, loss_disc_tr, variables_disc = self.train_discriminator(
-                ch_ltnt=None, tm_ltnt=None, chs_tr=chs_tr, tms_tr=tms_tr, fake_mode=False)
+                ch_ltnt=None, tm_ltnt=None, chs_tr=chs_tr, tms_tr=tms_tr, fake_mode=False, to_recycle=to_recycle)
             gradients_disc = tape.gradient(loss_disc_tr, variables_disc)
             self.optimizer_disc.apply_gradients(zip(gradients_disc, variables_disc))
             self.train_loss_disc(loss_disc_tr)
@@ -698,7 +697,7 @@ class GAN(tf.keras.models.Model):
         # Step 2. train discriminator on fake samples --------------------
         with tf.GradientTape() as tape:
             _, loss_disc_fk, variables_disc = self.train_discriminator(
-                ch_ltnt=ch_ltnt, tm_ltnt=tm_ltnt, chs_tr=None, tms_tr=None, fake_mode=True)
+                ch_ltnt=ch_ltnt, tm_ltnt=tm_ltnt, chs_tr=None, tms_tr=None, fake_mode=True, to_recycle=to_recycle)
             gradients_disc_fk = tape.gradient(loss_disc_fk, variables_disc)
             self.optimizer_disc.apply_gradients(zip(gradients_disc_fk, variables_disc))
             self.train_loss_disc(loss_disc_fk)
@@ -716,7 +715,9 @@ class GAN(tf.keras.models.Model):
               print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
               optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
               result_path=result_path, save_nsamples=3,
-              true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle=True):
+              true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2):
+
+        assert save_nsamples <= self.batch_size
 
         self.optimizer_gen = optmzr(gen_lr)
         self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
@@ -724,7 +725,6 @@ class GAN(tf.keras.models.Model):
         self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
         self.true_label_smooth = true_label_smooth
         self.fake_label_smooth = fake_label_smooth
-        self.recycle = recycle
 
         if self.mode_ != 'time':
             # consttile_ch: (batch, strt_dim, in_dim)
@@ -752,11 +752,16 @@ class GAN(tf.keras.models.Model):
                 chs_tr, tms_tr = true_samples[:, :, 0], true_samples[:, :, 1:]
 
                 # random vectors ---------------------------
+                if recycle_step is None:
+                    to_recycle = False
+                else:
+                    to_recycle = True if (i+1) % recycle_step == 0 else False
+
                 # nt_ltnt: (batch, in_dim, 1)
-                nt_ltnt = pre_out if recycle & (pre_out is not None) \
+                nt_ltnt = pre_out if to_recycle & (pre_out is not None) \
                     else tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
                 # tm_ltnt: (batch, in_dim, 1)
-                tm_ltnt = pre_out if recycle & (pre_out is not None) \
+                tm_ltnt = pre_out if to_recycle & (pre_out is not None) \
                     else tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
                 # nt_ltnt2: (batch, in_dim, 1)
                 nt_ltnt2 = tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
@@ -764,7 +769,7 @@ class GAN(tf.keras.models.Model):
                 tm_ltnt2 = tf.random.normal((self.batch_size, self.in_dim, 1), mean=0, stddev=1.0, dtype=tf.float32)
 
                 loss_disc_tr, loss_disc_fk, loss_gen, pre_out = self.train_step(
-                    (nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, chs_tr, tms_tr))
+                    (nt_ltnt, tm_ltnt, nt_ltnt2, tm_ltnt2, chs_tr, tms_tr), to_recycle=to_recycle)
 
                 if print_batch:
                     if (i + 1) % print_batch_step == 0:
@@ -800,7 +805,7 @@ class GAN(tf.keras.models.Model):
         if self.mode_ != 'time':
             consttile_ch_, chords_style_, chords_ini_, chords_emb_, \
             ch_b_fcs_, ch_g_fcs_, ch_up_trs_, ch_n_cv1s_, chsyn_activ_ = \
-                self.consttile_ch, self.chords_style, self.chords_ini, self.chords_emb, \
+                self.consttile_ch[:save_nsamples, :, :], self.chords_style, self.chords_ini, self.chords_emb, \
                 self.ch_b_fcs, self.ch_g_fcs, self.ch_up_trs, self.ch_n_cv1s, self.chsyn_activ
         else:
             consttile_ch_, chords_style_, chords_ini_, chords_emb_, \
@@ -809,7 +814,7 @@ class GAN(tf.keras.models.Model):
         if self.mode_ != 'chords':
             consttile_tm_, time_style_, time_ini_, tm_b_fcs_, tm_g_fcs_, \
             tm_up_trs_, tm_n_cv1s_, tmsyn_activ_ = \
-                self.consttile_tm, self.time_style, self.time_ini, self.tm_b_fcs, self.tm_g_fcs, \
+                self.consttile_tm[:save_nsamples, :, :], self.time_style, self.time_ini, self.tm_b_fcs, self.tm_g_fcs, \
                 self.tm_up_trs, self.tm_n_cv1s, self.tmsyn_activ
         else:
             consttile_tm_, time_style_, time_ini_, tm_b_fcs_, tm_g_fcs_, \

@@ -98,7 +98,8 @@ gan_model = GAN(out_seq_len_list=out_seq_len_list, embed_dim=embed_dim, time_fea
                 d_transformer_dropout_rate=d_transformer_dropout_rate, d_fc_activation=d_fc_activation,
                 d_out_dropout=d_out_dropout)
 
-gan_model.load_true_samples(tk, step=60, batch_size=50, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
+gan_model.load_true_samples(tk, step=out_seq_len_list[-1], batch_size=50,
+                            vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
                             pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])  # todo!!
 
 gan_model.load_model(const_path=const_path, chords_emb_path=chords_emb_path, ini_layer_path=ini_layer_path,
@@ -110,8 +111,7 @@ gan_model.set_trainable(train_emb=True, train_chords_ini=True, train_time_ini=Tr
                         train_syn_tm={k: True for k in out_seq_len_list}, train_disc=True)
 
 
-epochs = 2
-gan_model.train(tk, epochs=10, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=10,
+gan_model.train(tk, epochs=10, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=50,
                 print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
                 result_path=result_path, save_nsamples=3,
