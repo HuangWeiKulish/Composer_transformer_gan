@@ -19,12 +19,13 @@ class ChordsDiscriminator(tf.keras.Model):
         ch_in, de_in = inputs
         # ch_in: (batch, seq_len, embed_dim)
         # de_in: (batch, 1, embed_dim): the '<start>' embedding
+
         pre_out, _ = self.discr((ch_in, de_in, None, None))  # pre_out: (batch, 1, pre_out_dim)
         out = self.last_fc(pre_out)  # out: (batch, 1, 1)
         out = tf.keras.layers.Dropout(self.out_dropout)(out)  # out: (batch, 1, 1)
         out = tf.keras.layers.Flatten()(out)  # (batch, 1)
         if return_vec:
-            return pre_out, out
+            return tf.transpose(pre_out, perm=(0, 2, 1)), out
         return out
 
 
@@ -49,7 +50,7 @@ class TimeDiscriminator(tf.keras.Model):
         out = tf.keras.layers.Dropout(self.out_dropout)(out)  # out: (batch, 1, 1)
         out = tf.keras.layers.Flatten()(out)  # (batch, 1)
         if return_vec:
-            return pre_out, out
+            return tf.transpose(pre_out, perm=(0, 2, 1)), out
         return out
 
 
@@ -80,6 +81,6 @@ class Discriminator(tf.keras.Model):
         out = tf.keras.layers.Dropout(self.out_dropout)(out)  # out: (batch, 1, 1)
         out = tf.keras.layers.Flatten()(out)  # (batch, 1)
         if return_vec:
-            return pre_out, out
+            return tf.transpose(pre_out, perm=(0, 2, 1)), out
         return out
 
