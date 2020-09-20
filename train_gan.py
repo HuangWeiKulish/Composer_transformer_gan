@@ -115,7 +115,7 @@ gan_model.train(tk, epochs=10, save_model_step=1, save_sample_step=1, print_batc
                 print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
                 result_path=result_path, save_nsamples=3,
-                true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2)  # todo!!
+                true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=3)  # todo!!
 
 #gan_model.disc
 # train on chords latent -------------------------------------------------

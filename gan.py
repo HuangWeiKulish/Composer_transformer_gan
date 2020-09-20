@@ -653,7 +653,8 @@ class GAN(tf.keras.models.Model):
                 ch_conv_in, ch_styl, self.batch_size, self.embed_dim, self.strt_token_id, self.out_seq_len_list,
                 self.chords_emb, self.ch_b_fcs, self.ch_g_fcs, self.ch_up_trs, self.ch_n_cv1s,
                 self.chsyn_activ, tk=None, return_str=False)  # (batch, out_seq_len_list[-1], embed_dim)
-            vbs += self.chords_emb.trainable_variables + self.chsyn_activ.trainable_variables + [self.const_ch]
+            vbs += [self.const_ch] + self.chords_style.trainable_variables + self.chords_ini.trainable_variables + \
+                   self.chords_emb.trainable_variables + self.chsyn_activ.trainable_variables
             for i in range(len(self.out_seq_len_list)):
                 vbs += self.ch_b_fcs[i].trainable_variables + self.ch_g_fcs[i].trainable_variables + \
                        self.ch_up_trs[i].trainable_variables + self.ch_n_cv1s[i].trainable_variables
@@ -666,7 +667,8 @@ class GAN(tf.keras.models.Model):
                 tm_conv_in, tm_styl, self.batch_size, self.time_features, self.out_seq_len_list,
                 self.tm_b_fcs, self.tm_g_fcs, self.tm_up_trs, self.tm_n_cv1s,
                 self.tmsyn_activ)  # (batch, out_seq_len_list[-1], time_features)
-            vbs += self.tmsyn_activ.trainable_variables + [self.const_tm]
+            vbs += [self.const_tm] + self.time_style.trainable_variables + self.time_ini.trainable_variables + \
+                   self.tmsyn_activ.trainable_variables
             for i in range(len(self.out_seq_len_list)):
                 vbs += self.tm_b_fcs[i].trainable_variables + self.tm_g_fcs[i].trainable_variables + \
                        self.tm_up_trs[i].trainable_variables + self.tm_n_cv1s[i].trainable_variables
