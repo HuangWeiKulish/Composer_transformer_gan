@@ -7,38 +7,11 @@ import os
 vel_norm = 64.0
 tmps_norm = 0.12
 dur_norm = 1.3
-out_seq_len_list = (8,)  # (8, 16, 32, 64)
 
-# some layers
-ini_layer_path = {
-    'chords': '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/ini_chords',
-    'time': '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/ini_time'}
-const_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/constant'
-chords_emb_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_embedder'
-style_paths = {
-    'chords': '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_style',
-    'time': '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_style'}
-
-# synthesis
-chords_syn_path_base = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_syn'
-chords_syn_model_name_list = ['ch_b_fcs', 'ch_g_fcs', 'ch_n_cv1s', 'ch_up_trs']
-chords_syn_paths = {k: {k_: os.path.join(chords_syn_path_base, k, str(k_))
-                        for k_ in out_seq_len_list}
-                    for k in chords_syn_model_name_list}
-time_syn_path_base = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_syn'
-time_syn_model_name_list = ['tm_b_fcs', 'tm_g_fcs', 'tm_n_cv1s', 'tm_up_trs']
-time_syn_paths = {k: {k_: os.path.join(time_syn_path_base, k, str(k_))
-                      for k_ in out_seq_len_list}
-                  for k in time_syn_model_name_list}
-# discriminator
-disc_paths = {
-    'chords': '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_discriminator',
-    'time': '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/time_discriminator',
-    'both': '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/discriminator'}
 # random sample result
 result_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/result'
 
-tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_final.pkl'
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_gan.pkl'
 tk = pkl.load(open(tk_path, 'rb'))
 
 embed_dim = 16
@@ -112,15 +85,22 @@ gan_model.set_trainable(train_emb=True, train_chords_ini=True, train_time_ini=Tr
 
 
 gan_model.train(tk, epochs=10, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=50,
-                print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
+                print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.2,
                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
                 result_path=result_path, save_nsamples=3,
                 true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=3)  # todo!!
 
-#gan_model.disc
-# train on chords latent -------------------------------------------------
+
+# import matplotlib.pyplot as plt
+# data = list(gan_model.true_data.prefetch(100))[-1].numpy()[:, 0]
+# data = gan_model.chords_emb(data)
+# plt.hist(data.numpy().flatten(), bins=100)
+# plt.show()
+
+
 
 """
+
 import matplotlib.pyplot as plt
 # nt_ltnt = np.random.uniform(-1.5, 1.5, (10, 16, 16))
 import util
