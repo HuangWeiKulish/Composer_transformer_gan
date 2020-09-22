@@ -21,10 +21,10 @@ model_paths = {k: os.path.join(path_base, k) for k in
 result_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/result'
 
 """
-tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_gan.pkl'
+tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_mod.pkl'
 tk = pkl.load(open(tk_path, 'rb'))
 import json
-len(json.loads(tk.get_config()['index_word']))  # 15001
+len(json.loads(tk.get_config()['index_word']))  # 15000
 """
 
 
@@ -32,7 +32,7 @@ class GAN(tf.keras.models.Model):
 
     def __init__(self, in_dim=512, embed_dim=16,
                  chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
-                 strt_dim=3, strt_token_id=15001, chords_pool_size=15001, n_heads=4, init_knl=3, max_pos=None,
+                 strt_dim=3, chords_pool_size=15001, n_heads=4, init_knl=3, max_pos=None,
                  chsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
                  chsyn_encoder_layers=3, chsyn_decoder_layers=3, chsyn_fc_layers=3, chsyn_norm_epsilon=1e-6,
                  chsyn_embedding_dropout_rate=0.2, chsyn_transformer_dropout_rate=0.2,
@@ -52,10 +52,6 @@ class GAN(tf.keras.models.Model):
         self.time_features = time_features  # 3 for [velocity, velocity, time since last start, chords duration]
         self.in_dim = in_dim
         self.strt_dim = strt_dim
-        self.strt_token_id = strt_token_id  # strt_token_id = tk.word_index['<start>']
-        #self.n_heads = n_heads
-        #self.chords_pool_size = chords_pool_size
-
         # callback settings
         self.ckpts = dict()
         self.ckpt_managers = dict()
@@ -70,9 +66,8 @@ class GAN(tf.keras.models.Model):
         if self.mode_ != 'time':
             self.chords_style = generator.Mapping(fc_layers=chstl_fc_layers, activ=chstl_activ)
             self.chords_syn = generator.ChordsSynthesis(
-                strt_token_id=strt_token_id, out_chords_pool_size=chords_pool_size, embed_dim=embed_dim,
-                init_knl=init_knl, strt_dim=strt_dim, n_heads=n_heads, max_pos=max_pos,
-                fc_activation=chsyn_fc_activation, encoder_layers=chsyn_encoder_layers,
+                out_chords_pool_size=chords_pool_size, embed_dim=embed_dim, init_knl=init_knl, strt_dim=strt_dim,
+                n_heads=n_heads, max_pos=max_pos, fc_activation=chsyn_fc_activation, encoder_layers=chsyn_encoder_layers,
                 decoder_layers=chsyn_decoder_layers, fc_layers=chsyn_fc_layers, norm_epsilon=chsyn_norm_epsilon,
                 embedding_dropout_rate=chsyn_embedding_dropout_rate,
                 transformer_dropout_rate=chsyn_transformer_dropout_rate)
@@ -190,30 +185,21 @@ class GAN(tf.keras.models.Model):
         if fake_mode:
             chs_fk, tms_fk = self.gen_fake(ch_ltnt, tm_ltnt)
             if self.mode_ == 'chords':
-                de_in = self.chords_syn.chords_emb(tf.constant(
-                    [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
-                d_inputs = chs_fk, de_in
+                d_inputs = chs_fk
             elif self.mode_ == 'time':
                 d_inputs = tms_fk
             else:  # self.mode_ == 'comb'
-                de_in = self.chords_syn.chords_emb(tf.constant(
-                    [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
-                d_inputs = chs_fk, tms_fk, de_in
+                d_inputs = chs_fk, tms_fk
             pred = self.disc(d_inputs, return_vec=False)  # (batch, 1)
             pre_out = None  # no recycle based on fake samples
         else:  # fake_mode is False
             if self.mode_ == 'chords':
-                de_in = self.chords_syn.chords_emb(tf.constant(
-                    [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
-                chs_tr = self.chords_syn.chords_emb(chs_tr)  # (batch, out_seq_len, embed_dim)
-                d_inputs = chs_tr, de_in
+                d_inputs = self.chords_syn.chords_emb(chs_tr)  # (batch, out_seq_len, embed_dim)
             elif self.mode_ == 'time':
                 d_inputs = tms_tr
             else:  # self.mode_ == 'comb'
-                de_in = self.chords_syn.chords_emb(tf.constant(
-                    [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
                 chs_tr = self.chords_syn.chords_emb(chs_tr)  # (batch, out_seq_len, embed_dim)
-                d_inputs = chs_tr, tms_tr, de_in
+                d_inputs = chs_tr, tms_tr
             if to_recycle:
                 # pre_out: (batch, in_dim, 1)
                 # pred: (batch, 1)
@@ -245,15 +231,11 @@ class GAN(tf.keras.models.Model):
 
         chs_fk, tms_fk = self.gen_fake(ch_ltnt, tm_ltnt)
         if self.mode_ == 'chords':
-            de_in = self.chords_syn.chords_emb(tf.constant(
-                [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
-            d_inputs = chs_fk, de_in
+            d_inputs = chs_fk
         elif self.mode_ == 'time':
             d_inputs = tms_fk
         else:  # self.mode_ == 'comb'
-            de_in = self.chords_syn.chords_emb(tf.constant(
-                [[self.strt_token_id]] * self.batch_size, dtype=tf.float32))  # (batch, 1, embed_dim)
-            d_inputs = chs_fk, tms_fk, de_in
+            d_inputs = chs_fk, tms_fk
         pred = self.disc(d_inputs, return_vec=False)  # (batch, 1)
 
         vbs = []
@@ -316,7 +298,6 @@ class GAN(tf.keras.models.Model):
               true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2):
 
         assert save_nsamples <= self.batch_size
-
         self.out_seq_len = out_seq_len
         self.optimizer_gen = optmzr(gen_lr)
         self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
@@ -408,7 +389,6 @@ class GAN(tf.keras.models.Model):
         ary = np.concatenate([ch_pred[:, :, np.newaxis].astype(object), tm_pred.astype(object)], axis=-1)
         mids = []
         for ary_i in ary:
-            ary_i = ary_i[ary_i[:, 0] != '<start>']
             ary_i[:, 1] = np.clip(ary_i[:, 1], 0, 127)
             mid_i = preprocess.Conversion.arry2mid(ary_i)
             mids.append(mid_i)
@@ -427,8 +407,7 @@ embed_dim=16
 chstl_fc_layers=4
 chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1)
 strt_dim=3
-strt_token_id=15001
-chords_pool_size=15001
+chords_pool_size=15000
 n_heads=4
 init_knl=3
 max_pos=None

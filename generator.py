@@ -81,11 +81,10 @@ class ChordsEmbedder(tf.keras.layers.Layer):
 
 class ChordsSynthesis(tf.keras.models.Model):
 
-    def __init__(self, strt_token_id=15001, out_chords_pool_size=15001, embed_dim=16, init_knl=3, strt_dim=5,
+    def __init__(self, out_chords_pool_size=15001, embed_dim=16, init_knl=3, strt_dim=5,
                  n_heads=4, max_pos=800, fc_activation="relu", encoder_layers=2, decoder_layers=2, fc_layers=3,
                  norm_epsilon=1e-6, embedding_dropout_rate=0.2, transformer_dropout_rate=0.2):
         super(ChordsSynthesis, self).__init__()
-        self.strt_token_id = strt_token_id   # strt_token_id = tk.word_index['<start>']
         self.strt_dim = strt_dim
         self.embed_dim = embed_dim
         self.encoder_layers = encoder_layers
@@ -109,11 +108,8 @@ class ChordsSynthesis(tf.keras.models.Model):
     def call(self, inputs, training=None, mask=None, return_str=False, tk=None):
         # styl: (batch, in_dim)
         styl, out_seq_len = inputs
-
         x_en = self.init_fc(styl)  # (batch, embed_dim)
         x_en = self.init_ext(x_en[:, tf.newaxis, :])  # (batch, strt_dim, embed_dim)
-        self.x_de = self.chords_emb(tf.constant(
-            [[self.strt_token_id]] * styl.shape[0], dtype=tf.float32))  # (batch, 1, embed_dim)
         beta = self.b_fc(styl)[:, tf.newaxis, :]  # (batch, 1, embed_dim)
         gamma = self.g_fc(styl)[:, tf.newaxis, :]  # (batch, 1, embed_dim)
         # (batch, out_seq_len, embed_dim)
@@ -123,6 +119,7 @@ class ChordsSynthesis(tf.keras.models.Model):
     def extend_x(self, x_en, out_seq_len, beta, gamma, return_str=False, tk=None):
         # x_en: (batch, strt_dim, embed_dim)
         result = []  # (out_seq_len, batch)
+        x_de = tf.ones((x_en.shape[0], 1, self.embed_dim))  # (batch, 1, embed_dim)
         for i in range(out_seq_len):
             # noise_en: list of noise (batch, en_time_in, embed_dim), list length = encoder_layers
             # noise_de_1: list of noise (batch, out_seq_len, embed_dim), list length = decoder_layers
@@ -134,7 +131,7 @@ class ChordsSynthesis(tf.keras.models.Model):
             noise_de_2 = self.noise_de2_fc(tf.random.uniform(
                 (self.decoder_layers, x_en.shape[0], 1, self.embed_dim)))
             # x_out: (batch, 1, out_chords_pool_size)
-            x_out, _ = self.chords_extend((x_en, self.x_de, None, None),
+            x_out, _ = self.chords_extend((x_en, x_de, None, None),
                                           noise_en=noise_en, noise_de_1=noise_de_1, noise_de_2=noise_de_2)
             # translate prediction to text
             pred = tf.argmax(x_out, -1)  # (batch, 1)
@@ -181,7 +178,6 @@ class TimeSynthesis(tf.keras.models.Model):
         styl, out_seq_len = inputs
         x_en = self.init_fc(styl)  # (batch, time_features)
         x_en = self.init_ext(x_en[:, tf.newaxis, :])  # (batch, strt_dim, time_features)
-        self.x_de = tf.ones((styl.shape[0], 1, self.time_features))  # (batch, 1, time_features)
         beta = self.b_fc(styl)[:, tf.newaxis, :]  # (batch, 1, time_features)
         gamma = self.g_fc(styl)[:, tf.newaxis, :]  # (batch, 1, time_features)
         x_out = self.extend_x(x_en, out_seq_len, beta, gamma)  # (batch, out_seq_len, time_features)
@@ -191,6 +187,7 @@ class TimeSynthesis(tf.keras.models.Model):
         # x_en: (batch, strt_dim, time_features)
         # beta: (batch, 1, time_features)
         # gamma: (batch, 1, time_features)
+        x_de = tf.ones((x_en.shape[0], 1, self.time_features))  # (batch, 1, time_features)
         for i in range(out_seq_len):
             # noise_en: list of noise (batch, en_time_in, time_features), list length = encoder_layers
             # noise_de_1: list of noise (batch, out_seq_len, time_features), list length = decoder_layers
@@ -202,9 +199,8 @@ class TimeSynthesis(tf.keras.models.Model):
             noise_de_2 = self.noise_de2_fc(tf.random.uniform(
                 (self.decoder_layers, x_en.shape[0], 1, self.embed_dim)))
             # x_out: (batch, 1, time_features)
-            x_out, _ = self.chords_extend((x_en, self.x_de, None, None),
+            x_out, _ = self.chords_extend((x_en, x_de, None, None),
                                           noise_en=noise_en, noise_de_1=noise_de_1, noise_de_2=noise_de_2)
-
             pred = AdaInstanceNormalization()([x_out, beta, gamma])
             x_en = tf.concat((x_en, pred), axis=1)  # (batch, en_time_in+1, time_features)
         return x_en[:, self.strt_dim:, :]  # (batch, out_seq_len, time_features)

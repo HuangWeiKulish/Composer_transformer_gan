@@ -9,17 +9,16 @@ class ChordsDiscriminator(tf.keras.Model):
         super(ChordsDiscriminator, self).__init__()
         assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
         self.out_dropout = out_dropout
+        self.embed_dim = embed_dim
         self.discr = transformer.Transformer(
             embed_dim=embed_dim, n_heads=n_heads, out_chords_pool_size=pre_out_dim,  # todo
             encoder_layers=encoder_layers, decoder_layers=decoder_layers, fc_layers=fc_layers,
             norm_epsilon=norm_epsilon, dropout_rate=transformer_dropout_rate, fc_activation=fc_activation)
         self.last_fc = tf.keras.layers.Dense(1, activation='sigmoid')
 
-    def call(self, inputs, return_vec=False, training=None, mask=None):
-        ch_in, de_in = inputs
+    def call(self, ch_in, return_vec=False, training=None, mask=None):
         # ch_in: (batch, seq_len, embed_dim)
-        # de_in: (batch, 1, embed_dim): the '<start>' embedding
-
+        de_in = tf.ones((ch_in.shape[0], 1, self.embed_dim))  # (batch, 1, embed_dim)
         pre_out, _ = self.discr((ch_in, de_in, None, None),
                                 noise_en=None, noise_de_1=None, noise_de_2=None)  # pre_out: (batch, 1, pre_out_dim)
         out = self.last_fc(pre_out)  # out: (batch, 1, 1)
@@ -63,6 +62,7 @@ class Discriminator(tf.keras.Model):
         super(Discriminator, self).__init__()
         assert embed_dim % n_heads == 0, 'make sure: embed_dim % n_heads == 0'
         self.out_dropout = out_dropout
+        self.embed_dim = embed_dim
         self.tm_in_expand = tf.keras.layers.Conv1D(
             filters=embed_dim, kernel_size=kernel_size, strides=1, padding='same')
         self.discr = transformer.Transformer(
@@ -72,12 +72,13 @@ class Discriminator(tf.keras.Model):
         self.last_fc = tf.keras.layers.Dense(1, activation='sigmoid')
 
     def call(self, inputs, return_vec=False, training=None, mask=None):
-        ch_in, tm_in, de_in = inputs
+        ch_in, tm_in = inputs
         # de_in: (batch, 1, embed_dim): the '<start>' embedding
         # ch_in: (batch, seq_len, embed_dim)
         # tm_in: (batch, seq_len, 3): 3 for [velocity, velocity, time since last start, notes duration]
         tm_in_ = self.tm_in_expand(tm_in)  # (batch, seq_len, embed_dim)
         disr_in = tf.math.add(ch_in, tm_in_)  # (batch, seq_len, embed_dim)
+        de_in = tf.ones((ch_in.shape[0], 1, self.embed_dim))  # (batch, 1, embed_dim)
         pre_out, _ = self.discr((disr_in, de_in, None, None),
                                 noise_en=None, noise_de_1=None, noise_de_2=None)  # pre_out: (batch, 1, 1)
         out = self.last_fc(pre_out)  # out: (batch, 1, 1)
