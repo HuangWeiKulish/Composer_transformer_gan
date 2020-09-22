@@ -381,9 +381,14 @@ class GAN(tf.keras.models.Model):
         ch_ltnt = tf.random.normal((save_nsamples, self.in_dim), mean=0, stddev=1.0, dtype=tf.float32)
         # tm_ltnt: (save_nsamples, in_dim)
         tm_ltnt = tf.random.normal((save_nsamples, self.in_dim), mean=0, stddev=1.0, dtype=tf.float32)
-        # ch_pred: (batch, out_seq_len, embed_dim)
-        # tm_pred: (batch, out_seq_len, time_features)
+        # ch_pred: (batch, out_seq_len, embed_dim) or None
+        # tm_pred: (batch, out_seq_len, time_features) or None
         ch_pred, tm_pred = self.gen_fake(ch_ltnt, tm_ltnt, return_str=True, tk=tk)
+        if self.mode_ != 'time':
+            tm_pred = np.array([[[1] * 3] * self.out_seq_len] * save_nsamples)
+        if self.mode_ != 'chords':
+            ch_pred = np.array([[['64']] * self.out_seq_len] * save_nsamples)
+
         tm_pred = np.multiply(tm_pred, np.array([vel_norm, tmps_norm, dur_norm]))  # denormalise
         # ary: (save_nsamples, out_seq_len, 4)
         ary = np.concatenate([ch_pred[:, :, np.newaxis].astype(object), tm_pred.astype(object)], axis=-1)
