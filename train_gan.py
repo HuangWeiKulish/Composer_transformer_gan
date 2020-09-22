@@ -54,6 +54,8 @@ d_out_dropout = 0.3
 
 # train on time latent -------------------------------------------------
 mode_ = 'chords'
+
+out_seq_len = 8
 gan_model = GAN(in_dim=in_dim, embed_dim=embed_dim, chstl_fc_layers=chstl_fc_layers, chstl_activ=chstl_activ,
                 strt_dim=strt_dim, chords_pool_size=chords_pool_size, n_heads=n_heads, init_knl=init_knl,
                 max_pos=max_pos, chsyn_fc_activation=chsyn_fc_activation, chsyn_encoder_layers=chsyn_encoder_layers,
@@ -68,7 +70,7 @@ gan_model = GAN(in_dim=in_dim, embed_dim=embed_dim, chstl_fc_layers=chstl_fc_lay
                 d_transformer_dropout_rate=d_transformer_dropout_rate, d_fc_activation=d_fc_activation,
                 d_out_dropout=d_out_dropout, mode_=mode_)
 
-gan_model.load_true_samples(tk, step=30, batch_size=10, out_seq_len=64,
+gan_model.load_true_samples(tk, step=out_seq_len, batch_size=100, out_seq_len=out_seq_len,
                             vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
                             pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])  # todo!!
 
@@ -83,16 +85,10 @@ gan_model.train(tk, epochs=10, save_model_step=1, save_sample_step=1, print_batc
                 true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=3)  # todo!!
 
 
-# import matplotlib.pyplot as plt
-# data = list(gan_model.true_data.prefetch(100))[-1].numpy()[:, 0]
-# data = gan_model.chords_emb(data)
-# plt.hist(data.numpy().flatten(), bins=100)
-# plt.show()
-
+# gan_model.gen_music(1, tk)
 
 
 """
-
 import matplotlib.pyplot as plt
 # nt_ltnt = np.random.uniform(-1.5, 1.5, (10, 16, 16))
 import util

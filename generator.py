@@ -23,20 +23,18 @@ class AdaInstanceNormalization(tf.keras.layers.Layer):
         return normed * gamma + beta
 
 
-class Mapping(tf.keras.layers.Layer):
+class Mapping(tf.keras.models.Model):
 
-    def __init__(self, fc_layers=4, dropout_rate=0.2, epsilon=0.0001, activ=tf.keras.layers.LeakyReLU(alpha=0.1)):
+    def __init__(self, fc_layers=4, dropout_rate=0.2, activ=tf.keras.layers.LeakyReLU(alpha=0.1)):
         super(Mapping, self).__init__()
-        self.ln = tf.keras.layers.LayerNormalization(epsilon=epsilon, axis=0)
         self.fcs = tf.keras.models.Sequential(
             [tf.keras.models.Sequential([tf.keras.layers.Dense(1, activation=activ),
                                          tf.keras.layers.Dropout(dropout_rate)])
              for _ in range(fc_layers)])
 
-    def call(self, x, training=None):
+    def call(self, x, training=None, mask=None):
         # x: (batch, in_dim)
-        out = self.ln(x)  # (batch, in_dim)
-        out = self.fcs(out)  # (batch, in_dim)
+        out = self.fcs(x)  # (batch, in_dim)
         return out
 
 

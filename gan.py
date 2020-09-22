@@ -1,14 +1,11 @@
 import os
 import time
 import numpy as np
-import pickle as pkl
 import tensorflow as tf
 import util
 import discriminator
 import generator
 import preprocess
-import transformer
-import matplotlib.pyplot as plt
 
 vel_norm = 64.0
 tmps_norm = 0.12
@@ -353,7 +350,7 @@ class GAN(tf.keras.models.Model):
                             epoch+1, i+1, loss_gen.numpy().mean(), loss_disc_fk.numpy().mean(),
                             loss_disc_tr.numpy().mean()))
 
-                if (i + 1) % 500 == 0:
+                if (i + 1) % 100 == 0:
                     self.save_models()
                     mids = self.gen_music(save_nsamples, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
                     for sp, mid in enumerate(mids):
