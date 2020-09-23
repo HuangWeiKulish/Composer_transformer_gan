@@ -36,20 +36,11 @@ def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
 def load_true_data_pretrain_gen(
         tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
         pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
-    # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_dict_final.pkl'
-    # tk = pkl.load(open(tk_path, 'rb'))
     x_in, x_tar = preprocess.DataPreparation.batch_preprocessing_pretrain_gen(
-        in_seq_len, out_seq_len-1, step, pths, name_substr_list)
-    batch = x_in.shape[0]
-    # append '<start>' in front and '<end>' at the end
-    x_tar = np.concatenate(
-        [np.expand_dims(np.array([['<start>', 0, 0, 0]] * batch, dtype=object), axis=1),
-         x_tar,
-         np.expand_dims(np.array([['<end>', 0, 0, 0]] * batch, dtype=object), axis=1)], axis=1)
-
+        in_seq_len, out_seq_len, step, pths, name_substr_list)
     x_in_ = number_encode_text(x_in, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
     x_tar_ = number_encode_text(x_tar, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
-    dataset = tf.data.Dataset.from_tensor_slices((x_in_, x_tar_[:, :-1, :], x_tar_[:, 1:, :])).cache()
+    dataset = tf.data.Dataset.from_tensor_slices((x_in_, x_tar_)).cache()
     dataset = dataset.shuffle(x_in.shape[0]+1).batch(batch_size)
     return dataset
 

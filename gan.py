@@ -350,7 +350,7 @@ class GAN(tf.keras.models.Model):
                             epoch+1, i+1, loss_gen.numpy().mean(), loss_disc_fk.numpy().mean(),
                             loss_disc_tr.numpy().mean()))
 
-                if (i + 1) % 100 == 0:
+                if (i + 1) % 50 == 0:
                     self.save_models()
                     mids = self.gen_music(save_nsamples, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
                     for sp, mid in enumerate(mids):

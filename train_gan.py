@@ -78,11 +78,13 @@ gan_model.load_model(model_paths, max_to_keep=5)
 gan_model.set_trainable(train_chords_style=True, train_chords_syn=True, train_time_style=True, train_time_syn=True,
                         train_disc=True)
 
-gan_model.train(tk, epochs=10, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=10,
-                print_epoch=True, print_epoch_step=1, disc_lr=0.0002, gen_lr=0.01,
-                optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
-                result_path=result_path, save_nsamples=3,
-                true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=3)  # todo!!
+gan_model.train(
+    tk, epochs=10, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=10, print_epoch=True,
+    print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
+    optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
+    g_loss_func=tf.keras.losses.binary_crossentropy, d_loss_func=tf.keras.losses.binary_crossentropy,
+    result_path=result_path, out_seq_len=out_seq_len, save_nsamples=3, vel_norm=vel_norm, tmps_norm=tmps_norm,
+    dur_norm=dur_norm, true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2)  # todo!!
 
 
 # gan_model.gen_music(1, tk)
