@@ -1,7 +1,6 @@
 import util
 import generator
 import tensorflow as tf
-import json
 import pickle as pkl
 import os
 import time
@@ -24,10 +23,32 @@ result_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_tran
 tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_mod.pkl'
 tk = pkl.load(open(tk_path, 'rb'))
 
-in_seq_len = 5
-out_seq_len = 64
+
+# -------------------------- pretrain chords embedder and projector --------------------------
+
+#
+# You can use the cosine distance between the embedding vectors in W and embedded_chars:
+#
+# # assume embedded_chars.shape == (batch_size, embedding_size)
+# emb_distances = tf.matmul( # shape == (vocab_size, batch_size)
+#     tf.nn.l2_normalize(W, dim=1),
+#     tf.nn.l2_normalize(embedded_chars, dim=1),
+#     transpose_b=True)
+# token_ids = tf.argmax(emb_distances, axis=0) # shape == (batch_size)
+
+
+
+
+
+
+
+
+
+
+in_seq_len = 16
+out_seq_len = 1
 true_data = util.load_true_data_pretrain_gen(
-        tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+        tk, in_seq_len, out_seq_len, step=4, batch_size=200, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
         pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])  # todo:
 
 
@@ -58,7 +79,7 @@ chords_syn = generator.ChordsSynthesis(
     transformer_dropout_rate=chsyn_transformer_dropout_rate)
 
 # load existing model
-warmup_steps = 4000
+warmup_steps = 400
 learning_rate = util.CustomSchedule(embed_dim, warmup_steps)
 optmzr = lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
 max_to_keep = 5
@@ -91,7 +112,7 @@ def pred_output_ch(x_in, out_seq_len, chords_syn, return_str=False):
     return x_en[:, x_in.shape[1]:, :], tf.concat(pred_l, axis=1)
 
 
-def pretrain_ch(true_data, optmzr, epochs, print_batch_step=50, print_epoch_step=1, save_model_step=3,
+def pretrain_ch(true_data, optmzr, epochs, print_batch_step=10, print_epoch_step=1, save_model_step=1,
                 save_nsamples=3):
     train_loss = tf.keras.metrics.Mean(name='train_loss')
     for epoch in range(epochs):
@@ -109,18 +130,18 @@ def pretrain_ch(true_data, optmzr, epochs, print_batch_step=50, print_epoch_step
 
             if (i + 1) % print_batch_step == 0:
                 print('Epoch {} Batch {}: loss={:.4f}'.format(epoch + 1, i + 1, loss_chords.numpy()))
-                spl = tf.argmax(pred, -1).numpy()[np.random.choice(range(x_in.shape[0]), 3)]
-                chs = np.array([[tk.index_word[pd + 1] for pd in spl[i]] for i in range(len(spl))])
-                tms = np.multiply(np.array([[[1] * 3] * out_seq_len] * len(spl)),
-                                  np.array([vel_norm, tmps_norm, dur_norm]))
-                # ary: (save_nsamples, out_seq_len, 4)
-                ary = np.concatenate([chs[:, :, np.newaxis].astype(object), tms.astype(object)], axis=-1)
-                for j, ary_i in enumerate(ary):
-                    ary_i[:, 1] = np.clip(ary_i[:, 1], 0, 127)
-                    mid = preprocess.Conversion.arry2mid(ary_i)
-                    file_name = os.path.join(result_path, 'chords', 'ep{}_{}_{}.mid'.format(epoch + 1, i + 1, j))
-                    mid.save(file_name)
-                print('Saved {} fake samples'.format(save_nsamples))
+                # spl = tf.argmax(pred, -1).numpy()[np.random.choice(range(x_in.shape[0]), 3)]
+                # chs = np.array([[tk.index_word[pd + 1] for pd in spl[i]] for i in range(len(spl))])
+                # tms = np.multiply(np.array([[[1] * 3] * out_seq_len] * len(spl)),
+                #                   np.array([vel_norm, tmps_norm, dur_norm]))
+                # # ary: (save_nsamples, out_seq_len, 4)
+                # ary = np.concatenate([chs[:, :, np.newaxis].astype(object), tms.astype(object)], axis=-1)
+                # for j, ary_i in enumerate(ary):
+                #     ary_i[:, 1] = np.clip(ary_i[:, 1], 0, 127)
+                #     mid = preprocess.Conversion.arry2mid(ary_i)
+                #     file_name = os.path.join(result_path, 'chords', 'ep{}_{}_{}.mid'.format(epoch + 1, i + 1, j))
+                #     mid.save(file_name)
+                # print('Saved {} fake samples'.format(save_nsamples))
 
         if (epoch + 1) % print_epoch_step == 0:
             print('Epoch {}: Loss = {:.4f}, Time used = {:.4f}'.format(
@@ -136,8 +157,8 @@ def pretrain_ch(true_data, optmzr, epochs, print_batch_step=50, print_epoch_step
         # ---------------------- call back setting --------------------------
 
 # pretrain
-pretrain_ch(true_data, optmzr(learning_rate), epochs=10, print_batch_step=50, print_epoch_step=1, save_model_step=3,
-            save_nsamples=3)
+pretrain_ch(true_data, optmzr(learning_rate), epochs=100, print_batch_step=1000, print_epoch_step=1, save_model_step=1,
+            save_nsamples=1)
 
 
 # -------------------------- pretrain time syn --------------------------

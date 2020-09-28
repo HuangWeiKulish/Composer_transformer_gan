@@ -12,6 +12,7 @@ tmps_norm = 0.12
 dur_norm = 1.3
 
 path_base = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/'
+embedder_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_embedder'
 model_paths = {k: os.path.join(path_base, k) for k in
                ['chords_style', 'chords_syn', 'time_style', 'time_syn',
                 'chords_disc', 'time_disc', 'comb_disc']}
@@ -29,10 +30,10 @@ class GAN(tf.keras.models.Model):
 
     def __init__(self, in_dim=512, embed_dim=16,
                  chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
-                 strt_dim=3, chords_pool_size=15001, n_heads=4, init_knl=3, max_pos=None,
+                 strt_dim=3, n_heads=4, init_knl=3,
                  chsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
                  chsyn_encoder_layers=3, chsyn_decoder_layers=3, chsyn_fc_layers=3, chsyn_norm_epsilon=1e-6,
-                 chsyn_embedding_dropout_rate=0.2, chsyn_transformer_dropout_rate=0.2,
+                  chsyn_transformer_dropout_rate=0.2,
                  time_features=3, tmstl_fc_layers=4, tmstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                  tmsyn_encoder_layers=3, tmsyn_decoder_layers=3, tmsyn_fc_layers=3, tmsyn_norm_epsilon=1e-6,
                  tmsyn_transformer_dropout_rate=0.2, tmsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
@@ -63,10 +64,9 @@ class GAN(tf.keras.models.Model):
         if self.mode_ != 'time':
             self.chords_style = generator.Mapping(fc_layers=chstl_fc_layers, activ=chstl_activ)
             self.chords_syn = generator.ChordsSynthesis(
-                out_chords_pool_size=chords_pool_size, embed_dim=embed_dim, init_knl=init_knl, strt_dim=strt_dim,
-                n_heads=n_heads, max_pos=max_pos, fc_activation=chsyn_fc_activation, encoder_layers=chsyn_encoder_layers,
+                embed_dim=embed_dim, init_knl=init_knl, strt_dim=strt_dim,
+                n_heads=n_heads, fc_activation=chsyn_fc_activation, encoder_layers=chsyn_encoder_layers,
                 decoder_layers=chsyn_decoder_layers, fc_layers=chsyn_fc_layers, norm_epsilon=chsyn_norm_epsilon,
-                embedding_dropout_rate=chsyn_embedding_dropout_rate,
                 transformer_dropout_rate=chsyn_transformer_dropout_rate)
         if self.mode_ != 'chords':
             self.time_style = generator.Mapping(fc_layers=tmstl_fc_layers, activ=tmstl_activ)
@@ -97,7 +97,8 @@ class GAN(tf.keras.models.Model):
 
     def load_true_samples(self, tk, step=30, batch_size=10, out_seq_len=64,
                           vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
-                          pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
+                          pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''],
+                          remove_same_chords=True):
         self.vel_norm = vel_norm
         self.tmps_norm = tmps_norm
         self.dur_norm = dur_norm
@@ -105,7 +106,8 @@ class GAN(tf.keras.models.Model):
         self.tk = tk
         self.true_data = util.load_true_data_gan(
             tk, out_seq_len, step=step, batch_size=batch_size, vel_norm=vel_norm,
-            tmps_norm=tmps_norm, dur_norm=dur_norm, pths=pths, name_substr_list=name_substr_list)
+            tmps_norm=tmps_norm, dur_norm=dur_norm, pths=pths, name_substr_list=name_substr_list,
+            remove_same_chords=remove_same_chords)
 
     def callback_setting(self, model, optimizer, name, checkpoint_path, max_to_keep):
         self.ckpts[name] = tf.train.Checkpoint(model=model, optimizer=optimizer)
@@ -191,11 +193,11 @@ class GAN(tf.keras.models.Model):
             pre_out = None  # no recycle based on fake samples
         else:  # fake_mode is False
             if self.mode_ == 'chords':
-                d_inputs = self.chords_syn.chords_emb(chs_tr)  # (batch, out_seq_len, embed_dim)
+                d_inputs = self.chords_syn.chords_emb(chs_tr)  # (batch, out_seq_len, embed_dim)  # todo!!!!!!!
             elif self.mode_ == 'time':
                 d_inputs = tms_tr
             else:  # self.mode_ == 'comb'
-                chs_tr = self.chords_syn.chords_emb(chs_tr)  # (batch, out_seq_len, embed_dim)
+                chs_tr = self.chords_syn.chords_emb(chs_tr)  # (batch, out_seq_len, embed_dim)  # todo!!!!!!!
                 d_inputs = chs_tr, tms_tr
             if to_recycle:
                 # pre_out: (batch, in_dim, 1)
@@ -329,17 +331,20 @@ class GAN(tf.keras.models.Model):
                 else:
                     to_recycle = True if (i+1) % recycle_step == 0 else False
 
-                # nt_ltnt: (batch, in_dim, 1)
+                # nt_ltnt: (batch, in_dim)
                 ch_ltnt = pre_out if to_recycle & (pre_out is not None) \
                     else tf.random.normal((self.batch_size, self.in_dim), mean=0, stddev=1.0, dtype=tf.float32)
-                # tm_ltnt: (batch, in_dim, 1)
+                    # tf.random.uniform((self.batch_size, self.in_dim), minval=-1.0, maxval=1.0)
+                # tm_ltnt: (batch, in_dim)
                 tm_ltnt = pre_out if to_recycle & (pre_out is not None) \
                     else tf.random.normal((self.batch_size, self.in_dim), mean=0, stddev=1.0, dtype=tf.float32)
-                # nt_ltnt2: (batch, in_dim, 1)
+                    # tf.random.uniform((self.batch_size, self.in_dim), minval=-1.0, maxval=1.0)
+                # nt_ltnt2: (batch, in_dim)
                 ch_ltnt2 = tf.random.normal((self.batch_size, self.in_dim), mean=0, stddev=1.0, dtype=tf.float32)
-                # tm_ltnt2: (batch, in_dim, 1)
+                    # tf.random.uniform((self.batch_size, self.in_dim), minval=-1.0, maxval=1.0)
+                # tm_ltnt2: (batch, in_dim)
                 tm_ltnt2 = tf.random.normal((self.batch_size, self.in_dim), mean=0, stddev=1.0, dtype=tf.float32)
-
+                    # tf.random.uniform((self.batch_size, self.in_dim), minval=-1.0, maxval=1.0)
                 loss_disc_tr, loss_disc_fk, loss_gen, pre_out = self.train_step(
                     (ch_ltnt, tm_ltnt, ch_ltnt2, tm_ltnt2, chs_tr, tms_tr), to_recycle=to_recycle)
 
@@ -347,14 +352,14 @@ class GAN(tf.keras.models.Model):
                     if (i + 1) % print_batch_step == 0:
                         print('Epoch {} Batch {}: gen_loss={:.4f}; disc_fake_loss={:.4f}, '
                               'disc_true_loss={:.4f};'.format(
-                            epoch+1, i+1, loss_gen.numpy().mean(), loss_disc_fk.numpy().mean(),
+                            epoch + 1, i + 1, loss_gen.numpy().mean(), loss_disc_fk.numpy().mean(),
                             loss_disc_tr.numpy().mean()))
 
-                if (i + 1) % 50 == 0:
+                if (i + 1) % 100 == 0:
                     self.save_models()
                     mids = self.gen_music(save_nsamples, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
                     for sp, mid in enumerate(mids):
-                        file_name = os.path.join(result_path, self.mode_, 'ep{}_{}_{}.mid'.format(epoch+1, i+1, sp))
+                        file_name = os.path.join(result_path, self.mode_, 'ep{}_{}_{}.mid'.format(epoch + 1, i + 1, sp))
                         mid.save(file_name)
                     print('Saved {} fake samples'.format(save_nsamples))
 
@@ -408,17 +413,14 @@ in_dim=512
 embed_dim=16
 chstl_fc_layers=4
 chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1)
-strt_dim=3
-chords_pool_size=15000
+strt_dim=5
 n_heads=4
 init_knl=3
-max_pos=None
 chsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1)
 chsyn_encoder_layers=3
 chsyn_decoder_layers=3
 chsyn_fc_layers=3
 chsyn_norm_epsilon=1e-6
-chsyn_embedding_dropout_rate=0.2
 chsyn_transformer_dropout_rate=0.2
 time_features=3
 tmstl_fc_layers=4

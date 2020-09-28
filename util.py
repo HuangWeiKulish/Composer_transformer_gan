@@ -47,11 +47,14 @@ def load_true_data_pretrain_gen(
 
 def load_true_data_gan(
         tk, seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
-        pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
+        pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''], remove_same_chords=False):
     # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_dict_final.pkl'
     # tk = pkl.load(open(tk_path, 'rb'))
     x_in = preprocess.DataPreparation.batch_preprocessing_gan(
         seq_len, step=step, pths=pths, name_substr_list=name_substr_list)  # (batch, seq_len, 4)
+    if remove_same_chords:
+        x_in = [ary for ary in x_in if len(np.unique(ary[:, 0])) > 1]
+        x_in = np.stack(x_in)
     x_in = number_encode_text(x_in, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
     dataset = tf.data.Dataset.from_tensor_slices(x_in).cache()
     dataset = dataset.shuffle(x_in.shape[0]+1).batch(batch_size)

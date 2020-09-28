@@ -27,8 +27,8 @@ n_heads = 4
 init_knl = 3
 max_pos = None
 chsyn_fc_activation = tf.keras.layers.LeakyReLU(alpha=0.1)
-chsyn_encoder_layers = 3
-chsyn_decoder_layers = 3
+chsyn_encoder_layers = 4
+chsyn_decoder_layers = 4
 chsyn_fc_layers = 3
 chsyn_norm_epsilon = 1e-6
 chsyn_embedding_dropout_rate = 0.2
@@ -36,8 +36,8 @@ chsyn_transformer_dropout_rate = 0.2
 time_features = 3
 tmstl_fc_layers = 4
 tmstl_activ = tf.keras.layers.LeakyReLU(alpha=0.1)
-tmsyn_encoder_layers = 3
-tmsyn_decoder_layers = 3
+tmsyn_encoder_layers = 4
+tmsyn_decoder_layers = 4
 tmsyn_fc_layers = 3
 tmsyn_norm_epsilon = 1e-6
 tmsyn_transformer_dropout_rate = 0.2
@@ -55,7 +55,7 @@ d_out_dropout = 0.3
 # train on time latent -------------------------------------------------
 mode_ = 'chords'
 
-out_seq_len = 8
+out_seq_len = 64  # 4
 gan_model = GAN(in_dim=in_dim, embed_dim=embed_dim, chstl_fc_layers=chstl_fc_layers, chstl_activ=chstl_activ,
                 strt_dim=strt_dim, chords_pool_size=chords_pool_size, n_heads=n_heads, init_knl=init_knl,
                 max_pos=max_pos, chsyn_fc_activation=chsyn_fc_activation, chsyn_encoder_layers=chsyn_encoder_layers,
@@ -70,43 +70,45 @@ gan_model = GAN(in_dim=in_dim, embed_dim=embed_dim, chstl_fc_layers=chstl_fc_lay
                 d_transformer_dropout_rate=d_transformer_dropout_rate, d_fc_activation=d_fc_activation,
                 d_out_dropout=d_out_dropout, mode_=mode_)
 
-gan_model.load_true_samples(tk, step=out_seq_len, batch_size=100, out_seq_len=out_seq_len,
+gan_model.load_true_samples(tk, step=out_seq_len//2, batch_size=100, out_seq_len=out_seq_len,
                             vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
-                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])  # todo!!
+                            pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''],
+                            remove_same_chords=True)  # todo!!
 
 gan_model.load_model(model_paths, max_to_keep=5)
 gan_model.set_trainable(train_chords_style=True, train_chords_syn=True, train_time_style=True, train_time_syn=True,
                         train_disc=True)
 
+@tf.function
+def g_loss_func(real, pred):
+    pass
+
+@tf.function
+def d_loss_func(real, pred):
+    pass
+
+
+g_loss_func = tf.keras.losses.binary_crossentropy
+d_loss_func = tf.keras.losses.binary_crossentropy
+optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
+"""
+d_loss_real = tf.reduce_mean(
+    tf.nn.sigmoid_cross_entropy_with_logits(logits=D_real_logits, labels=tf.ones_like(D_real)))
+d_loss_fake = tf.reduce_mean(
+    tf.nn.sigmoid_cross_entropy_with_logits(logits=D_fake_logits, labels=tf.zeros_like(D_fake)))
+d_loss = d_loss_real + d_loss_fake
+g_loss = tf.reduce_mean(
+            tf.nn.sigmoid_cross_entropy_with_logits(logits=D_fake_logits, labels=tf.ones_like(D_fake)))
+
+"""
+
 gan_model.train(
-    tk, epochs=10, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=10, print_epoch=True,
-    print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
-    optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
-    g_loss_func=tf.keras.losses.binary_crossentropy, d_loss_func=tf.keras.losses.binary_crossentropy,
+    tk, epochs=50, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=10, print_epoch=True,
+    print_epoch_step=1, disc_lr=0.0001, gen_lr=0.08,
+    optmzr=optmzr, g_loss_func=g_loss_func, d_loss_func=d_loss_func,
     result_path=result_path, out_seq_len=out_seq_len, save_nsamples=3, vel_norm=vel_norm, tmps_norm=tmps_norm,
     dur_norm=dur_norm, true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2)  # todo!!
 
 
 # gan_model.gen_music(1, tk)
 
-
-"""
-import matplotlib.pyplot as plt
-# nt_ltnt = np.random.uniform(-1.5, 1.5, (10, 16, 16))
-import util
-nt_ltnt = util.latant_vector(10, 16, 16, mean_=1.0, std_=0.5)
-plt.hist(nt_ltnt.flatten(), bins=100)
-plt.title('from normal chords latent')
-plt.show()
-
-vals = gan_model.chords_latent(np.random.uniform(0, 1.5, (100, 16, 16))).numpy()
-plt.hist(vals.flatten(), bins=100)
-plt.title('from uniform chords latent')
-plt.show()
-
-dt = [list(gan_model.true_data.prefetch(1))[0][:, :, 0].numpy() for i in range(100)]
-vals = gan_model.chords_gen.chords_emb(np.concatenate(dt)).numpy()
-plt.hist(vals.flatten(), bins=100)
-plt.title('from real music embedding')
-plt.show()   # multiple peaks !!
-"""
