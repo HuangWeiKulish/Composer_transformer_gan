@@ -216,7 +216,7 @@ class GAN(tf.keras.models.Model):
             (self.batch_size, 1), minval=self.true_label_smooth[0], maxval=self.true_label_smooth[1],
             dtype=tf.dtypes.float32)
 
-        loss_disc = self.d_loss_func(lbl, pred, from_logits=False, label_smoothing=0)
+        loss_disc = self.d_loss_func(lbl, pred)
         # if pre_out is not None:
         #     plt.hist(pre_out.numpy().flatten(), alpha=0.3, bins=100)
         #     plt.savefig('pre_out.png')
@@ -251,7 +251,7 @@ class GAN(tf.keras.models.Model):
 
         # label flipping with no label smoothing
         lbls = tf.ones((pred.shape[0], 1), dtype=tf.float32)  # (batch, 1)
-        loss_gen = self.g_loss_func(lbls, pred, from_logits=False, label_smoothing=0)
+        loss_gen = self.g_loss_func(lbls, pred)
         return loss_gen, vbs
 
     def train_step(self, inputs, to_recycle=True):
@@ -303,8 +303,8 @@ class GAN(tf.keras.models.Model):
         self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
         self.true_label_smooth = true_label_smooth
         self.fake_label_smooth = fake_label_smooth
-        self.g_loss_func = g_loss_func  # todo: change???
-        self.d_loss_func = d_loss_func  # todo: change???
+        self.g_loss_func = g_loss_func
+        self.d_loss_func = d_loss_func
 
         pre_out = None
 
@@ -414,7 +414,6 @@ class GAN(tf.keras.models.Model):
 # Todo: use minibatch discrimination (https://towardsdatascience.com/gan-ways-to-improve-gan-performance-acf37f9f59b)
 # Todo: use tanh at the last layer of generator
 # Todo: schedule training like: if disc_loss > gen_loss ==> train gen, else train disc
-# Todo: use different loss function max(logD)
 
 """
 latent_std=1.0

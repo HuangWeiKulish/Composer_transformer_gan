@@ -10,105 +10,48 @@ dur_norm = 1.3
 
 path_base = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/'
 model_paths = {k: os.path.join(path_base, k) for k in
-               ['chords_style', 'chords_syn', 'time_style', 'time_syn',
+               ['chords_embedder', 'chords_style', 'chords_syn', 'time_style', 'time_syn',
                 'chords_disc', 'time_disc', 'comb_disc']}
 result_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/result'
 
-tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_mod.pkl'
-tk = pkl.load(open(tk_path, 'rb'))
 
-in_dim = 512
-embed_dim = 16
-chstl_fc_layers = 4
-chstl_activ = tf.keras.layers.LeakyReLU(alpha=0.1)
-strt_dim = 3
-chords_pool_size = 15000
-n_heads = 4
-init_knl = 3
-max_pos = None
-chsyn_fc_activation = tf.keras.layers.LeakyReLU(alpha=0.1)
-chsyn_encoder_layers = 4
-chsyn_decoder_layers = 4
-chsyn_fc_layers = 3
-chsyn_norm_epsilon = 1e-6
-chsyn_embedding_dropout_rate = 0.2
-chsyn_transformer_dropout_rate = 0.2
-time_features = 3
-tmstl_fc_layers = 4
-tmstl_activ = tf.keras.layers.LeakyReLU(alpha=0.1)
-tmsyn_encoder_layers = 4
-tmsyn_decoder_layers = 4
-tmsyn_fc_layers = 3
-tmsyn_norm_epsilon = 1e-6
-tmsyn_transformer_dropout_rate = 0.2
-tmsyn_fc_activation = tf.keras.layers.LeakyReLU(alpha=0.1)
-d_kernel_size = 3
-d_encoder_layers = 2
-d_decoder_layers = 2
-d_fc_layers = 3
-d_norm_epsilon = 1e-6
-d_transformer_dropout_rate = 0.2
-d_fc_activation = tf.keras.activations.tanh
-d_out_dropout = 0.3
-
-
-# train on time latent -------------------------------------------------
+# train on chords latent -------------------------------------------------
 mode_ = 'chords'
 
-out_seq_len = 64  # 4
-gan_model = GAN(in_dim=in_dim, embed_dim=embed_dim, chstl_fc_layers=chstl_fc_layers, chstl_activ=chstl_activ,
-                strt_dim=strt_dim, chords_pool_size=chords_pool_size, n_heads=n_heads, init_knl=init_knl,
-                max_pos=max_pos, chsyn_fc_activation=chsyn_fc_activation, chsyn_encoder_layers=chsyn_encoder_layers,
-                chsyn_decoder_layers=chsyn_decoder_layers, chsyn_fc_layers=chsyn_fc_layers,
-                chsyn_norm_epsilon=chsyn_norm_epsilon, chsyn_embedding_dropout_rate=chsyn_embedding_dropout_rate,
-                chsyn_transformer_dropout_rate=chsyn_transformer_dropout_rate, time_features=time_features,
-                tmstl_fc_layers=tmstl_fc_layers, tmstl_activ=tmstl_activ, tmsyn_encoder_layers=tmsyn_encoder_layers,
-                tmsyn_decoder_layers=tmsyn_decoder_layers, tmsyn_fc_layers=tmsyn_fc_layers,
-                tmsyn_norm_epsilon=tmsyn_norm_epsilon, tmsyn_transformer_dropout_rate=tmsyn_transformer_dropout_rate,
-                tmsyn_fc_activation=tmsyn_fc_activation, d_kernel_size=d_kernel_size, d_encoder_layers=d_encoder_layers,
-                d_decoder_layers=d_decoder_layers, d_fc_layers=d_fc_layers, d_norm_epsilon=d_norm_epsilon,
-                d_transformer_dropout_rate=d_transformer_dropout_rate, d_fc_activation=d_fc_activation,
-                d_out_dropout=d_out_dropout, mode_=mode_)
-
-gan_model.load_true_samples(tk, step=out_seq_len//2, batch_size=100, out_seq_len=out_seq_len,
+out_seq_len = 4
+gan_model = GAN(in_dim=512, embed_dim=16, latent_std=1.0, strt_dim=3, n_heads=4, init_knl=3,
+                chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
+                chsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
+                chsyn_encoder_layers=3, chsyn_decoder_layers=3, chsyn_fc_layers=3, chsyn_norm_epsilon=1e-6,
+                chsyn_transformer_dropout_rate=0.2, chsyn_noise_std=0.5,
+                time_features=3, tmstl_fc_layers=4, tmstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
+                tmsyn_encoder_layers=3, tmsyn_decoder_layers=3, tmsyn_fc_layers=3, tmsyn_norm_epsilon=1e-6,
+                tmsyn_transformer_dropout_rate=0.2, tmsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
+                tmsyn_noise_std=0.5,
+                d_kernel_size=3, d_encoder_layers=1, d_decoder_layers=1, d_fc_layers=3, d_norm_epsilon=1e-6,
+                d_transformer_dropout_rate=0.2, d_fc_activation=tf.keras.activations.tanh,
+                d_out_dropout=0.3, d_recycle_fc_activ=tf.keras.activations.elu, mode_='comb')
+gan_model.load_model(model_paths, max_to_keep=5)
+gan_model.set_trainable(train_chords_style=True, train_chords_syn=False, train_time_style=False, train_time_syn=False,
+                        train_disc=True)
+gan_model.load_true_samples(step=30, batch_size=10, out_seq_len=64,
                             vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
                             pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''],
-                            remove_same_chords=True)  # todo!!
+                            remove_same_chords=True)
 
-gan_model.load_model(model_paths, max_to_keep=5)
-gan_model.set_trainable(train_chords_style=True, train_chords_syn=True, train_time_style=True, train_time_syn=True,
-                        train_disc=True)
-
-@tf.function
-def g_loss_func(real, pred):
-    pass
-
-@tf.function
-def d_loss_func(real, pred):
-    pass
-
-
+# train
 g_loss_func = tf.keras.losses.binary_crossentropy
 d_loss_func = tf.keras.losses.binary_crossentropy
 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
-"""
-d_loss_real = tf.reduce_mean(
-    tf.nn.sigmoid_cross_entropy_with_logits(logits=D_real_logits, labels=tf.ones_like(D_real)))
-d_loss_fake = tf.reduce_mean(
-    tf.nn.sigmoid_cross_entropy_with_logits(logits=D_fake_logits, labels=tf.zeros_like(D_fake)))
-d_loss = d_loss_real + d_loss_fake
-g_loss = tf.reduce_mean(
-            tf.nn.sigmoid_cross_entropy_with_logits(logits=D_fake_logits, labels=tf.ones_like(D_fake)))
+gan_model.train(epochs=10, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=10,
+                print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
+                optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
+                g_loss_func=tf.keras.losses.KLDivergence(), d_loss_func=tf.keras.losses.KLDivergence(),
+                result_path=result_path, out_seq_len=64, save_nsamples=3,
+                true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2)
+# gan_model.gen_music(1)
 
-"""
-
-gan_model.train(
-    tk, epochs=50, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=10, print_epoch=True,
-    print_epoch_step=1, disc_lr=0.0001, gen_lr=0.08,
-    optmzr=optmzr, g_loss_func=g_loss_func, d_loss_func=d_loss_func,
-    result_path=result_path, out_seq_len=out_seq_len, save_nsamples=3, vel_norm=vel_norm, tmps_norm=tmps_norm,
-    dur_norm=dur_norm, true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2)  # todo!!
+# train on time latent -------------------------------------------------
 
 
-# gan_model.gen_music(1, tk)
 

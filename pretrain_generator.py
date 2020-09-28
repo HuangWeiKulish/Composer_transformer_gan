@@ -1,11 +1,9 @@
 import util
 import generator
 import tensorflow as tf
-import pickle as pkl
 import os
 import time
 import numpy as np
-import preprocess
 import gensim
 
 tf.keras.backend.set_floatx('float32')
@@ -33,27 +31,23 @@ true_data = util.load_true_data_pretrain_gen(
 
 
 # -------------------------- pretrain chords syn --------------------------
-in_dim = 512
 embed_dim = 16
-chstl_fc_layers = 4
-chstl_activ = tf.keras.layers.LeakyReLU(alpha=0.1)
 strt_dim = 5
 n_heads = 4
 init_knl = 3
-max_pos = None
 chsyn_fc_activation = tf.keras.layers.LeakyReLU(alpha=0.1)
 chsyn_encoder_layers = 3
 chsyn_decoder_layers = 3
 chsyn_fc_layers = 3
 chsyn_norm_epsilon = 1e-6
-chsyn_embedding_dropout_rate = 0.2
 chsyn_transformer_dropout_rate = 0.2
+noise_std = 1.0
 
 chords_syn = generator.ChordsSynthesis(
                 embed_dim=embed_dim, init_knl=init_knl, strt_dim=strt_dim,
                 n_heads=n_heads, fc_activation=chsyn_fc_activation, encoder_layers=chsyn_encoder_layers,
                 decoder_layers=chsyn_decoder_layers, fc_layers=chsyn_fc_layers, norm_epsilon=chsyn_norm_epsilon,
-                transformer_dropout_rate=chsyn_transformer_dropout_rate, noise_std=1.0)
+                transformer_dropout_rate=chsyn_transformer_dropout_rate, noise_std=noise_std)
 
 # load existing model
 warmup_steps = 400
