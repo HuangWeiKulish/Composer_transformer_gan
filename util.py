@@ -19,61 +19,41 @@ def lookahead_mask(seq_len):
     return 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
 
 
-def softargmax(x, beta=1e10):
-    x = tf.convert_to_tensor(x)
-    x_range = tf.range(x.shape.as_list()[-1], dtype=x.dtype)
-    return tf.reduce_sum(tf.nn.softmax(x*beta) * x_range, axis=-1)
-
-
-def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
-    # x: (batch, length, 4); 4 columns: [chords in text format, velocity, time since last start, chords duration]
-    # ------------- encode chords from text to integer --------------
-    x_0 = tk.texts_to_sequences(x[:, :, 0].tolist())
-    return np.append(np.expand_dims(x_0, axis=-1) - 1,  # ..- 1 because tk index starts from 1
-                     np.divide(x[:, :, 1:], np.array([vel_norm, tmps_norm, dur_norm])), axis=-1).astype(np.float32)
+# def softargmax(x, beta=1e10):
+#     x = tf.convert_to_tensor(x)
+#     x_range = tf.range(x.shape.as_list()[-1], dtype=x.dtype)
+#     return tf.reduce_sum(tf.nn.softmax(x*beta) * x_range, axis=-1)
+#
+#
+# def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
+#     # x: (batch, length, 4); 4 columns: [chords in text format, velocity, time since last start, chords duration]
+#     # ------------- encode chords from text to integer --------------
+#     x_0 = tk.texts_to_sequences(x[:, :, 0].tolist())
+#     return np.append(np.expand_dims(x_0, axis=-1) - 1,  # ..- 1 because tk index starts from 1
+#                      np.divide(x[:, :, 1:], np.array([vel_norm, tmps_norm, dur_norm])), axis=-1).astype(np.float32)
 
 
 def load_true_data_pretrain_gen(
-        tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+        in_seq_len, out_seq_len, step=60, batch_size=50,
         pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=['']):
     x_in, x_tar = preprocess.DataPreparation.batch_preprocessing_pretrain_gen(
         in_seq_len, out_seq_len, step, pths, name_substr_list)
-    x_in_ = number_encode_text(x_in, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
-    x_tar_ = number_encode_text(x_tar, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
-    dataset = tf.data.Dataset.from_tensor_slices((x_in_, x_tar_)).cache()
+    dataset = tf.data.Dataset.from_tensor_slices((x_in.astype(str), x_tar.astype(str))).cache()
     dataset = dataset.shuffle(x_in.shape[0]+1).batch(batch_size)
     return dataset
 
 
 def load_true_data_gan(
-        tk, seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3,
+        seq_len, step=60, batch_size=50,
         pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''], remove_same_chords=False):
-    # tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_dict_final.pkl'
-    # tk = pkl.load(open(tk_path, 'rb'))
     x_in = preprocess.DataPreparation.batch_preprocessing_gan(
         seq_len, step=step, pths=pths, name_substr_list=name_substr_list)  # (batch, seq_len, 4)
     if remove_same_chords:
         x_in = [ary for ary in x_in if len(np.unique(ary[:, 0])) > 1]
         x_in = np.stack(x_in)
-    x_in = number_encode_text(x_in, tk, vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm)
-    dataset = tf.data.Dataset.from_tensor_slices(x_in).cache()
+    dataset = tf.data.Dataset.from_tensor_slices(x_in.astype(str)).cache()
     dataset = dataset.shuffle(x_in.shape[0]+1).batch(batch_size)
     return dataset
-
-
-"""
-import pickle as pkl
-tk_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/model/chords_indexcer/chords_dict_final.pkl'
-tk = pkl.load(open(tk_path, 'rb'))
-
-in_seq_len, out_seq_len = 16, 64
-dataset = load_true_data(tk, in_seq_len, out_seq_len, step=60, batch_size=50, vel_norm=64.0, tmps_norm=0.12, 
-    dur_norm=1.3, pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])
-
-x_in, x_tar_in, x_tar_out = list(dataset.prefetch(1).as_numpy_iterator())[0]
-print(x_in.shape, x_tar_in.shape, x_tar_out.shape)
-
-"""
 
 
 class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):

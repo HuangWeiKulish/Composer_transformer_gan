@@ -43,12 +43,14 @@ class Mapping(tf.keras.models.Model):
 class ChordsSynthesis(tf.keras.models.Model):
 
     def __init__(self, embed_dim=16, init_knl=3, strt_dim=5, n_heads=4, fc_activation=tf.keras.activations.relu,
-                 encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6, transformer_dropout_rate=0.2):
+                 encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6, transformer_dropout_rate=0.2,
+                 noise_std=0.5):
         super(ChordsSynthesis, self).__init__()
         self.strt_dim = strt_dim
         self.embed_dim = embed_dim
         self.encoder_layers = encoder_layers
         self.decoder_layers = decoder_layers
+        self.noise_std = noise_std
         self.init_fc = tf.keras.layers.Dense(embed_dim)
         self.init_ext = tf.keras.layers.Conv1DTranspose(filters=embed_dim, kernel_size=init_knl, strides=strt_dim)
         self.chords_extend = transformer.Transformer(
@@ -60,7 +62,7 @@ class ChordsSynthesis(tf.keras.models.Model):
         self.noise_en_fc = tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='zeros')
         self.noise_de_fc = tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='zeros')
 
-    def call(self, inputs, training=None, mask=None, return_str=False, tk=None):
+    def call(self, inputs, training=None, mask=None):
         # styl: (batch, in_dim)
         styl, out_seq_len = inputs
         x_en = self.init_fc(styl)  # (batch, embed_dim)
@@ -79,9 +81,9 @@ class ChordsSynthesis(tf.keras.models.Model):
             # noise_en: list of noise (batch, en_time_in, embed_dim), list length = encoder_layers
             # noise_de: list of noise (batch, out_seq_len, embed_dim), list length = decoder_layers
             noise_en = self.noise_en_fc(tf.random.normal(
-                (self.encoder_layers, x_en.shape[0], x_en.shape[1], self.embed_dim), stddev=0.5))
+                (self.encoder_layers, x_en.shape[0], x_en.shape[1], self.embed_dim), stddev=self.noise_std))
             noise_de = self.noise_de_fc(tf.random.normal(
-                (self.encoder_layers, x_en.shape[0], 1, self.embed_dim), stddev=0.5))
+                (self.encoder_layers, x_en.shape[0], 1, self.embed_dim), stddev=self.noise_std))
             # x_out: (batch, 1, embed_dim)
             x_out, _ = self.chords_extend((x_en, x_de, None, None), noise_en=noise_en, noise_de=noise_de)
             x_out = AdaInstanceNormalization()([x_out, beta, gamma])
@@ -92,12 +94,14 @@ class ChordsSynthesis(tf.keras.models.Model):
 class TimeSynthesis(tf.keras.models.Model):
 
     def __init__(self, time_features=3, init_knl=3, strt_dim=5, fc_activation=tf.keras.activations.relu,
-                 encoder_layers=1, decoder_layers=1, fc_layers=3, norm_epsilon=1e-6, transformer_dropout_rate=0.2):
+                 encoder_layers=1, decoder_layers=1, fc_layers=3, norm_epsilon=1e-6, transformer_dropout_rate=0.2,
+                 noise_std=0.5):
         super(TimeSynthesis, self).__init__()
         self.time_features = time_features
         self.strt_dim = strt_dim
         self.encoder_layers = encoder_layers
         self.decoder_layers = decoder_layers
+        self.noise_std = noise_std
         self.embed_dim = time_features
         self.init_fc = tf.keras.layers.Dense(time_features)
         self.init_ext = tf.keras.layers.Conv1DTranspose(filters=time_features, kernel_size=init_knl, strides=strt_dim)
@@ -129,9 +133,9 @@ class TimeSynthesis(tf.keras.models.Model):
             # noise_en: list of noise (batch, en_time_in, time_features), list length = encoder_layers
             # noise_de: list of noise (batch, out_seq_len, time_features), list length = decoder_layers
             noise_en = self.noise_en_fc(tf.random.normal(
-                (self.encoder_layers, x_en.shape[0], x_en.shape[1], self.time_features), stddev=0.5))
+                (self.encoder_layers, x_en.shape[0], x_en.shape[1], self.time_features), stddev=self.noise_std))
             noise_de = self.noise_de_fc(tf.random.normal(
-                (self.encoder_layers, x_en.shape[0], 1, self.time_features), stddev=0.5))
+                (self.encoder_layers, x_en.shape[0], 1, self.time_features), stddev=self.noise_std))
             # x_out: (batch, 1, time_features)
             x_out, _ = self.time_extend((x_en, x_de, None, None), noise_en=noise_en, noise_de=noise_de)
             x_out = AdaInstanceNormalization()([x_out, beta, gamma])
