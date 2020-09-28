@@ -70,15 +70,15 @@ class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
         arg2 = step * (self.warmup_steps ** -1.5)
         return tf.math.rsqrt(self.embed_dim) * tf.math.minimum(arg1, arg2)
 
-
-@tf.function
-def loss_func_chords(real, pred):
-    cross_entropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
-    mask = tf.math.logical_not(tf.math.equal(real, 0))
-    mask = tf.cast(mask, dtype=tf.float32)
-    loss_ = cross_entropy(real, pred)
-    loss_ *= mask  # (batch, out_seq_len)
-    return tf.reduce_sum(loss_) / tf.reduce_sum(mask)  # scalar
+#
+# @tf.function
+# def loss_func_chords(real, pred):
+#     cross_entropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
+#     mask = tf.math.logical_not(tf.math.equal(real, 0))
+#     mask = tf.cast(mask, dtype=tf.float32)
+#     loss_ = cross_entropy(real, pred)
+#     loss_ *= mask  # (batch, out_seq_len)
+#     return tf.reduce_sum(loss_) / tf.reduce_sum(mask)  # scalar
 
 
 @tf.function

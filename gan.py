@@ -22,15 +22,8 @@ result_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_tran
 class GAN(tf.keras.models.Model):
 
     def __init__(self,
-
-
-
-
-
-
-                 in_dim=512, embed_dim=16, latent_std=1.0,
+                 in_dim=512, embed_dim=16, latent_std=1.0, strt_dim=3, n_heads=4, init_knl=3,
                  chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
-                 strt_dim=3, n_heads=4, init_knl=3,
                  chsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
                  chsyn_encoder_layers=3, chsyn_decoder_layers=3, chsyn_fc_layers=3, chsyn_norm_epsilon=1e-6,
                  chsyn_transformer_dropout_rate=0.2, chsyn_noise_std=0.5,
@@ -98,7 +91,6 @@ class GAN(tf.keras.models.Model):
                 fc_activation=d_fc_activation, encoder_layers=d_encoder_layers, decoder_layers=d_decoder_layers,
                 fc_layers=d_fc_layers, norm_epsilon=d_norm_epsilon, transformer_dropout_rate=d_transformer_dropout_rate,
                 pre_out_dim=in_dim, out_dropout=d_out_dropout, recycle_fc_activ=d_recycle_fc_activ)
-
 
     def callback_setting(self, model, optimizer, name, checkpoint_path, max_to_keep):
         self.ckpts[name] = tf.train.Checkpoint(model=model, optimizer=optimizer)
@@ -299,7 +291,7 @@ class GAN(tf.keras.models.Model):
     def train(self, epochs=10, save_model_step=1, save_sample_step=1,
               print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
               optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
-              g_loss_func=tf.keras.losses.binary_crossentropy, d_loss_func=tf.keras.losses.binary_crossentropy,
+              g_loss_func=tf.keras.losses.KLDivergence(), d_loss_func=tf.keras.losses.KLDivergence(),
               result_path=result_path, out_seq_len=64, save_nsamples=3,
               true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2):
 
