@@ -392,16 +392,17 @@ class GAN(tf.keras.models.Model):
         # ch_pred: (batch, out_seq_len, embed_dim) or None
         # tm_pred: (batch, out_seq_len, time_features) or None
         ch_pred, tm_pred = self.gen_fake(ch_ltnt, tm_ltnt)
-        if self.mode_ != 'time':
-            tm_pred = np.array([[[1] * 3] * self.out_seq_len] * nsamples)
+        if tm_pred is None:
+            tm_pred = np.array([[[1] * 3] * self.out_seq_len] * nsamples)  # (nsamples, out_seq_len, 3)
+        if ch_pred is None:
+            ch_pred = np.array([[['64']] * self.out_seq_len] * nsamples)  # (nsamples, out_seq_len, 1)
+        else:
             ch_pred = np.array([[self.embedder.wv.similar_by_vector(ch, topn=1)[0][0] for ch in ch_p]
-                                for ch_p in ch_pred.numpy()])  # convert to string
-        if self.mode_ != 'chords':
-            ch_pred = np.array([[['64']] * self.out_seq_len] * nsamples)
+                                for ch_p in ch_pred.numpy()])[:, :, np.newaxis]  # str (nsamples, out_seq_len, 1)
 
         tm_pred = np.multiply(tm_pred, np.array([self.vel_norm, self.tmps_norm, self.dur_norm]))  # denormalise
         # ary: (nsamples, out_seq_len, 4)
-        ary = np.concatenate([ch_pred[:, :, np.newaxis].astype(object), tm_pred.astype(object)], axis=-1)
+        ary = np.concatenate([ch_pred.astype(object), tm_pred.astype(object)], axis=-1)
         mids = []
         for ary_i in ary:
             ary_i[:, 1] = np.clip(ary_i[:, 1], 0, 127)

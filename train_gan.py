@@ -23,32 +23,37 @@ gan_model = GAN(in_dim=512, embed_dim=16, latent_std=1.0, strt_dim=3, n_heads=4,
                 chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                 chsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
                 chsyn_encoder_layers=3, chsyn_decoder_layers=3, chsyn_fc_layers=3, chsyn_norm_epsilon=1e-6,
-                chsyn_transformer_dropout_rate=0.2, chsyn_noise_std=0.5,
+                chsyn_transformer_dropout_rate=0.2, chsyn_noise_std=0.3,
                 time_features=3, tmstl_fc_layers=4, tmstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                 tmsyn_encoder_layers=3, tmsyn_decoder_layers=3, tmsyn_fc_layers=3, tmsyn_norm_epsilon=1e-6,
                 tmsyn_transformer_dropout_rate=0.2, tmsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
-                tmsyn_noise_std=0.5,
+                tmsyn_noise_std=0.3,
                 d_kernel_size=3, d_encoder_layers=1, d_decoder_layers=1, d_fc_layers=3, d_norm_epsilon=1e-6,
                 d_transformer_dropout_rate=0.2, d_fc_activation=tf.keras.activations.tanh,
-                d_out_dropout=0.3, d_recycle_fc_activ=tf.keras.activations.elu, mode_='comb')
+                d_out_dropout=0.3, d_recycle_fc_activ=tf.keras.activations.elu, mode_=mode_)
 gan_model.load_model(model_paths, max_to_keep=5)
 gan_model.set_trainable(train_chords_style=True, train_chords_syn=False, train_time_style=False, train_time_syn=False,
                         train_disc=True)
-gan_model.load_true_samples(step=30, batch_size=10, out_seq_len=64,
+gan_model.load_true_samples(step=out_seq_len, batch_size=50, out_seq_len=out_seq_len,
                             vel_norm=vel_norm, tmps_norm=tmps_norm, dur_norm=dur_norm,
                             pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''],
                             remove_same_chords=True)
 
+
 # train
-g_loss_func = tf.keras.losses.binary_crossentropy
-d_loss_func = tf.keras.losses.binary_crossentropy
-optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
+def wasserstein_loss(y_true, y_pred):
+    return tf.keras.backend.mean(y_true * y_pred)
+
+
+g_loss_func = wasserstein_loss  # tf.keras.losses.KLDivergence()
+d_loss_func = wasserstein_loss  # tf.keras.losses.KLDivergence()
+
+optmzr = lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
 gan_model.train(epochs=10, save_model_step=1, save_sample_step=1, print_batch=True, print_batch_step=10,
                 print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
                 optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
-                g_loss_func=tf.keras.losses.KLDivergence(), d_loss_func=tf.keras.losses.KLDivergence(),
-                result_path=result_path, out_seq_len=64, save_nsamples=3,
-                true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2)
+                g_loss_func=g_loss_func, d_loss_func=d_loss_func, result_path=result_path, out_seq_len=out_seq_len,
+                save_nsamples=3, true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=3)
 # gan_model.gen_music(1)
 
 # train on time latent -------------------------------------------------

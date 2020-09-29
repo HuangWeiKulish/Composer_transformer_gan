@@ -23,10 +23,10 @@ embedder = gensim.models.Word2Vec.load(os.path.join(model_paths['chords_embedder
 
 
 # -------------------------- pretrain chords embedder and projector --------------------------
-in_seq_len = 16
+in_seq_len = 4
 out_seq_len = 1
 true_data = util.load_true_data_pretrain_gen(
-        in_seq_len, out_seq_len, step=60, batch_size=50,
+        in_seq_len, out_seq_len, step=in_seq_len//2, batch_size=50,
         pths='/Users/Wei/Desktop/midi_train/arry_modified', name_substr_list=[''])  # todo:
 
 
