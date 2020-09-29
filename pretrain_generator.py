@@ -23,7 +23,7 @@ embedder = gensim.models.Word2Vec.load(os.path.join(model_paths['chords_embedder
 
 
 # -------------------------- pretrain chords embedder and projector --------------------------
-in_seq_len = 4
+in_seq_len = 8
 out_seq_len = 1
 true_data = util.load_true_data_pretrain_gen(
         in_seq_len, out_seq_len, step=in_seq_len//2, batch_size=50,
@@ -55,7 +55,12 @@ learning_rate = util.CustomSchedule(embed_dim, warmup_steps)
 optmzr = lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
 max_to_keep = 5
 
-loss_func = tf.keras.losses.KLDivergence()
+
+def wasserstein_loss(y_true, y_pred):
+    return tf.keras.backend.mean(y_true * y_pred)
+
+
+loss_func = wasserstein_loss  # tf.keras.losses.KLDivergence()
 
 ckpts_ch = tf.train.Checkpoint(model=chords_syn, optimizer=optmzr(learning_rate))
 ckpt_managers_ch = tf.train.CheckpointManager(ckpts_ch, model_paths['chords_syn'], max_to_keep=max_to_keep)
