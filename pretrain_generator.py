@@ -35,7 +35,7 @@ embed_dim = 16
 strt_dim = 5
 n_heads = 4
 init_knl = 3
-chsyn_fc_activation = tf.keras.layers.LeakyReLU(alpha=0.1)
+chsyn_fc_activation = tf.keras.activations.elu
 chsyn_encoder_layers = 3
 chsyn_decoder_layers = 3
 chsyn_fc_layers = 3

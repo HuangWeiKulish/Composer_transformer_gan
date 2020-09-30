@@ -11,6 +11,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
         self.q_w = tf.keras.layers.Dense(embed_dim)
         self.k_w = tf.keras.layers.Dense(embed_dim)
         self.v_w = tf.keras.layers.Dense(embed_dim)
+        self.fc = tf.keras.layers.Dense(embed_dim)
 
     def call(self, inputs, training=None, mask=None):
         q, k, v = inputs
@@ -35,7 +36,7 @@ class MultiheadAttention(tf.keras.layers.Layer):
         context = tf.transpose(attention, [0, 2, 1, 3])  # (batch, time_out, n_heads, depth)
         context = tf.reshape(context, [tf.shape(context)[0], -1,
                                        context.shape[2] * attention.shape[3]])  # (batch_size, time_out, embed_dim)
-        return context, weights
+        return self.fc(context), weights
 
     @staticmethod
     def split_head(x, n_heads, depth):

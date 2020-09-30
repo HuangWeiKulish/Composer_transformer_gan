@@ -23,6 +23,7 @@ class WGAN(tf.keras.models.Model):
 
     def __init__(self,
                  in_dim=512, embed_dim=16, latent_std=1.0, strt_dim=3, n_heads=4, init_knl=3,
+                 max_pos=1000, pos_conv_knl=3,
                  chstl_fc_layers=4, chstl_activ=tf.keras.layers.LeakyReLU(alpha=0.1),
                  chsyn_fc_activation=tf.keras.layers.LeakyReLU(alpha=0.1),
                  chsyn_encoder_layers=3, chsyn_decoder_layers=3, chsyn_fc_layers=3, chsyn_norm_epsilon=1e-6,
@@ -70,7 +71,7 @@ class WGAN(tf.keras.models.Model):
                 time_features=time_features, init_knl=init_knl, strt_dim=strt_dim, fc_activation=tmsyn_fc_activation,
                 encoder_layers=tmsyn_encoder_layers, decoder_layers=tmsyn_decoder_layers, fc_layers=tmsyn_fc_layers,
                 norm_epsilon=tmsyn_norm_epsilon, transformer_dropout_rate=tmsyn_transformer_dropout_rate,
-                noise_std=tmsyn_noise_std)
+                noise_std=tmsyn_noise_std, max_pos=max_pos, pos_conv_knl=pos_conv_knl)
 
         # discriminator
         if mode_ == 'chords':

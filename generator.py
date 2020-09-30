@@ -1,5 +1,7 @@
 import tensorflow as tf
 import transformer
+import util
+
 
 tf.keras.backend.set_floatx('float32')
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
@@ -28,7 +30,7 @@ class Mapping(tf.keras.models.Model):
         super(Mapping, self).__init__()
         self.fcs = tf.keras.models.Sequential(
             [tf.keras.models.Sequential([tf.keras.layers.Dense(1, activation=activ),
-                                         #tf.keras.layers.GaussianNoise(0.3),
+                                         tf.keras.layers.GaussianNoise(0.5),
                                          #tf.keras.layers.Dropout(dropout_rate),
                                          tf.keras.layers.BatchNormalization(
                                              momentum=0.99, epsilon=0.001, center=True, scale=True,
@@ -44,7 +46,7 @@ class ChordsSynthesis(tf.keras.models.Model):
 
     def __init__(self, embed_dim=16, init_knl=3, strt_dim=5, n_heads=4, fc_activation=tf.keras.activations.relu,
                  encoder_layers=2, decoder_layers=2, fc_layers=3, norm_epsilon=1e-6, transformer_dropout_rate=0.2,
-                 noise_std=0.5):
+                 noise_std=0.5, max_pos=1000, pos_conv_knl=3):
         super(ChordsSynthesis, self).__init__()
         self.strt_dim = strt_dim
         self.embed_dim = embed_dim
@@ -61,6 +63,8 @@ class ChordsSynthesis(tf.keras.models.Model):
         self.g_fc = tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='ones')
         self.noise_en_fc = tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='zeros')
         self.noise_de_fc = tf.keras.layers.Dense(embed_dim, kernel_initializer='he_normal', bias_initializer='zeros')
+        self.pos_enc = util.positional_encoding(max_pos, embed_dim)
+        self.pos_comb_conv1 = tf.keras.layers.Conv1D(kernel_size=pos_conv_knl, filters=embed_dim, padding='same')
 
     def call(self, inputs, training=None, mask=None):
         # styl: (batch, in_dim)
@@ -77,6 +81,8 @@ class ChordsSynthesis(tf.keras.models.Model):
     def extend_x(self, x_en, out_seq_len, beta, gamma):
         # x_en: (batch, strt_dim, embed_dim)
         x_de = tf.ones((x_en.shape[0], 1, self.embed_dim))  # (batch, 1, embed_dim)
+        pos_enc_ = tf.tile(self.pos_enc, tf.constant([x_en.shape[0], 1, 1], tf.int32))  # (batch, max_pos, embed_dim)
+
         for i in range(out_seq_len):
             # noise_en: list of noise (batch, en_time_in, embed_dim), list length = encoder_layers
             # noise_de: list of noise (batch, out_seq_len, embed_dim), list length = decoder_layers
@@ -84,8 +90,10 @@ class ChordsSynthesis(tf.keras.models.Model):
                 (self.encoder_layers, x_en.shape[0], x_en.shape[1], self.embed_dim), stddev=self.noise_std))
             noise_de = self.noise_de_fc(tf.random.normal(
                 (self.encoder_layers, x_en.shape[0], 1, self.embed_dim), stddev=self.noise_std))
+            comb = tf.concat([x_en, pos_enc_[:, :x_en.shape[1], :]], axis=-1)  # (batch, en_time_in, embed_dim * 2)
+            comb = self.pos_comb_conv1(comb)  # (batch, en_time_in, embed_dim)
             # x_out: (batch, 1, embed_dim)
-            x_out, _ = self.chords_extend((x_en, x_de, None, None), noise_en=noise_en, noise_de=noise_de)
+            x_out, _ = self.chords_extend((comb, x_de, None, None), noise_en=noise_en, noise_de=noise_de)
             x_out = AdaInstanceNormalization()([x_out, beta, gamma])
             x_en = tf.concat((x_en, x_out), axis=1)  # (batch, en_time_in+1, embed_dim)
         return x_en[:, self.strt_dim:, :]  # (batch, out_seq_len, embed_dim)
@@ -95,7 +103,7 @@ class TimeSynthesis(tf.keras.models.Model):
 
     def __init__(self, time_features=3, init_knl=3, strt_dim=5, fc_activation=tf.keras.activations.relu,
                  encoder_layers=1, decoder_layers=1, fc_layers=3, norm_epsilon=1e-6, transformer_dropout_rate=0.2,
-                 noise_std=0.5):
+                 noise_std=0.5, max_pos=1000, pos_conv_knl=3):
         super(TimeSynthesis, self).__init__()
         self.time_features = time_features
         self.strt_dim = strt_dim
@@ -113,6 +121,8 @@ class TimeSynthesis(tf.keras.models.Model):
         self.g_fc = tf.keras.layers.Dense(time_features, kernel_initializer='he_normal', bias_initializer='ones')
         self.noise_en_fc = tf.keras.layers.Dense(time_features, kernel_initializer='he_normal', bias_initializer='zeros')
         self.noise_de_fc = tf.keras.layers.Dense(time_features, kernel_initializer='he_normal', bias_initializer='zeros')
+        self.pos_enc = util.positional_encoding(max_pos, time_features)
+        self.pos_comb_conv1 = tf.keras.layers.Conv1D(kernel_size=pos_conv_knl, filters=time_features, padding='same')
 
     def call(self, inputs, training=None, mask=None):
         # styl: (batch, in_dim)
@@ -129,6 +139,8 @@ class TimeSynthesis(tf.keras.models.Model):
         # beta: (batch, 1, time_features)
         # gamma: (batch, 1, time_features)
         x_de = tf.ones((x_en.shape[0], 1, self.time_features))  # (batch, 1, time_features)
+        pos_enc_ = tf.tile(self.pos_enc, tf.constant([x_en.shape[0], 1, 1], tf.int32))  # (batch, max_pos, time_features)
+
         for i in range(out_seq_len):
             # noise_en: list of noise (batch, en_time_in, time_features), list length = encoder_layers
             # noise_de: list of noise (batch, out_seq_len, time_features), list length = decoder_layers
@@ -136,8 +148,11 @@ class TimeSynthesis(tf.keras.models.Model):
                 (self.encoder_layers, x_en.shape[0], x_en.shape[1], self.time_features), stddev=self.noise_std))
             noise_de = self.noise_de_fc(tf.random.normal(
                 (self.encoder_layers, x_en.shape[0], 1, self.time_features), stddev=self.noise_std))
+            comb = tf.concat([x_en, pos_enc_[:, :x_en.shape[1], :]], axis=-1)  # (batch, en_time_in, time_features * 2)
+            comb = self.pos_comb_conv1(comb)  # (batch, en_time_in, time_features)
             # x_out: (batch, 1, time_features)
-            x_out, _ = self.time_extend((x_en, x_de, None, None), noise_en=noise_en, noise_de=noise_de)
+            x_out, _ = self.time_extend((comb, x_de, None, None), noise_en=noise_en, noise_de=noise_de)
             x_out = AdaInstanceNormalization()([x_out, beta, gamma])
             x_en = tf.concat((x_en, x_out), axis=1)  # (batch, en_time_in+1, time_features)
         return x_en[:, self.strt_dim:, :]  # (batch, out_seq_len, time_features)
+
