@@ -19,7 +19,7 @@ model_paths = {k: os.path.join(path_base, k) for k in
 result_path = '/Users/Wei/PycharmProjects/DataScience/Side_Project/Composer_transformer_gan/result'
 
 
-class GAN(tf.keras.models.Model):
+class WGAN(tf.keras.models.Model):
 
     def __init__(self,
                  in_dim=512, embed_dim=16, latent_std=1.0, strt_dim=3, n_heads=4, init_knl=3,
@@ -34,7 +34,7 @@ class GAN(tf.keras.models.Model):
                  d_kernel_size=3, d_encoder_layers=1, d_decoder_layers=1, d_fc_layers=3, d_norm_epsilon=1e-6,
                  d_transformer_dropout_rate=0.2, d_fc_activation=tf.keras.activations.tanh,
                  d_out_dropout=0.3, d_recycle_fc_activ=tf.keras.activations.elu, mode_='comb'):
-        super(GAN, self).__init__()
+        super(WGAN, self).__init__()
         if mode_ in ['chords', 'comb']:
             assert embed_dim % n_heads == 0, 'make sure: embed_dim % chsyn_n_heads == 0'
 
@@ -180,120 +180,119 @@ class GAN(tf.keras.models.Model):
             if self.mode_ != 'chords' else None
         return ch_pred, tm_pred
 
-    def train_discriminator(self, ch_ltnt, tm_ltnt, chs_tr, tms_tr, fake_mode=True):
-        # ch_ltnt: (batch, in_dim) np.array or None
-        # tm_ltnt: (batch, in_dim) np.array or None
-        # chs_tr: true sample chords (batch, out_seq_len, embed_dim) np.array or None
-        # tms_tr: true sample time (batch, out_seq_len, time_features) np.array or None
-        util.model_trainable(self.disc, trainable=True)  # unfreeze discriminator
-        if fake_mode:
-            # chs_fk: (batch, out_seq_len, embed_dim)
-            # tms_fk: (batch, out_seq_len, time_features)
-            chs_fk, tms_fk = self.gen_fake(ch_ltnt, tm_ltnt)
-            if self.mode_ == 'chords':
-                d_inputs = chs_fk
-            elif self.mode_ == 'time':
-                d_inputs = tms_fk
-            else:  # self.mode_ == 'comb'
-                d_inputs = chs_fk, tms_fk
-            _, pred = self.disc(d_inputs)  # (batch, 1)
-            pre_out = None  # no recycle using fake samples
-        else:  # fake_mode is False
-            if self.mode_ == 'chords':
-                d_inputs = chs_tr
-            elif self.mode_ == 'time':
-                d_inputs = tms_tr
-            else:  # self.mode_ == 'comb'
-                d_inputs = chs_tr, tms_tr
-            # pre_out: (batch, in_dim)
-            # pred: (batch, 1)
-            pre_out, pred = self.disc(d_inputs)
-
-        lbl = tf.random.uniform(
-            (self.batch_size, 1), minval=self.fake_label_smooth[0], maxval=self.fake_label_smooth[1],
-            dtype=tf.dtypes.float32) if fake_mode \
-            else tf.random.uniform(
-            (self.batch_size, 1), minval=self.true_label_smooth[0], maxval=self.true_label_smooth[1],
-            dtype=tf.dtypes.float32)
-
-        loss_disc = self.d_loss_func(lbl, pred)
-        # if pre_out is not None:
-        #     plt.hist(pre_out.numpy().flatten(), alpha=0.3, bins=100)
-        #     plt.savefig('pre_out.png')
-        return pre_out, loss_disc, self.disc.trainable_variables
-
-    def train_generator(self, ch_ltnt, tm_ltnt):
-        # ch_ltnt: (batch, in_dim) np.array or None
-        # tm_ltnt: (batch, in_dim) np.array or None
-        util.model_trainable(self.disc, trainable=False)  # freeze discriminator
-        # chs_fk: (batch, out_seq_len, embed_dim)
-        # tms_fk: (batch, out_seq_len, time_features)
-        chs_fk, tms_fk = self.gen_fake(ch_ltnt, tm_ltnt)
-        if self.mode_ == 'chords':
-            d_inputs = chs_fk
-        elif self.mode_ == 'time':
-            d_inputs = tms_fk
-        else:  # self.mode_ == 'comb'
-            d_inputs = chs_fk, tms_fk
-        _, pred = self.disc(d_inputs)  # (batch, 1)
-
-        vbs = []
-        if self.mode_ != 'time':
-            if self.train_chords_style:
-                vbs += self.chords_style.trainable_variables
-            if self.train_chords_syn:
-                vbs += self.chords_syn.trainable_variables
-        if self.mode_ != 'chords':
-            if self.train_time_style:
-                vbs += self.time_style.trainable_variables
-            if self.train_time_syn:
-                vbs += self.time_syn.trainable_variables
-
-        # label flipping with no label smoothing
-        lbls = tf.ones((pred.shape[0], 1), dtype=tf.float32)  # (batch, 1)
-        loss_gen = self.g_loss_func(lbls, pred)
-        return loss_gen, vbs
+    def gradient_penalty(self, interpolates):
+        with tf.GradientTape() as tape_g:
+            tape_g.watch(interpolates)
+            _, pred_ch = self.disc(interpolates)  # (batch, 1)
+            gradients_disc = tape_g.gradient(pred_ch, [interpolates])
+        # gradients_disc[0]: (batch, out_seq_len, embed_dim or time_features)
+        slopes = tf.sqrt(tf.math.reduce_sum(tf.math.square(gradients_disc[0])))
+        gradient_penalty = tf.reduce_mean((slopes - 1.0) ** 2)
+        return gradient_penalty
 
     def train_step(self, inputs, to_recycle=True):
-        # ch_ltnt: (batch, in_dim, 1)
-        # tm_ltnt: (batch, in_dim, 1)
-        # ch_ltnt2: (batch, in_dim, 1)
-        # tm_ltnt2: (batch, in_dim, 1)
-        # chs_tr: true sample chords (batch, in_seq_len)
-        # tms_tr: true sample time (batch, in_seq_len, time_features)
+        # ch_ltnt: (batch, in_dim)
+        # tm_ltnt: (batch, in_dim)
+        # ch_ltnt2: (batch, in_dim)
+        # tm_ltnt2: (batch, in_dim)
+        # chs_tr: true sample chords (batch, out_seq_len, embed_dim) np.array or None
+        # tms_tr: true sample time (batch, out_seq_len, time_features) np.array or None
         ch_ltnt, tm_ltnt, ch_ltnt2, tm_ltnt2, chs_tr, tms_tr = inputs
 
-        # Step 1. train discriminator on true samples --------------------
+        # Step 1. train discriminator --------------------
         with tf.GradientTape() as tape:
-            pre_out, loss_disc_tr, variables_disc = self.train_discriminator(
-                ch_ltnt=None, tm_ltnt=None, chs_tr=chs_tr, tms_tr=tms_tr, fake_mode=False)
-            gradients_disc = tape.gradient(loss_disc_tr, variables_disc)
-            self.optimizer_disc.apply_gradients(zip(gradients_disc, variables_disc))
-            self.train_loss_disc(loss_disc_tr)
+            util.model_trainable(self.disc, trainable=True)  # unfreeze discriminator
+            # chs_fk: (batch, out_seq_len, embed_dim)
+            # tms_fk: (batch, out_seq_len, time_features)
 
-        # Step 2. train discriminator on fake samples --------------------
-        with tf.GradientTape() as tape:
-            _, loss_disc_fk, variables_disc = self.train_discriminator(
-                ch_ltnt=ch_ltnt, tm_ltnt=tm_ltnt, chs_tr=None, tms_tr=None, fake_mode=True)
-            gradients_disc_fk = tape.gradient(loss_disc_fk, variables_disc)
-            self.optimizer_disc.apply_gradients(zip(gradients_disc_fk, variables_disc))
-            self.train_loss_disc(loss_disc_fk)
+            """
+            ch_ltnt=tf.ones((50, 512))
+            tm_ltnt =tf.ones((50, 512))
+            embed_dim=16
+            chs_tr = tf.ones((50, out_seq_len, embed_dim))
+            batch_size=50
+            gan_model
 
-        # Step 3: freeze discriminator and use the fake sample with true label to train generator ---------------
+            """
+            alpha = tf.random.uniform((self.batch_size, 1, 1), minval=0.0, maxval=1.0)
+            chs_fk, tms_fk = self.gen_fake(ch_ltnt, tm_ltnt)
+
+            if self.mode_ == 'chords':
+                _, d_fk = self.disc(chs_fk)  # (batch, 1)
+                tape.watch(d_fk)
+                pre_out, d_tr = self.disc(chs_tr)  # (batch, 1)
+                tape.watch(d_tr)
+                interpolates = chs_tr + alpha * (chs_fk - chs_tr)  # (batch, out_seq_len, embed_dim)
+                gp = self.gradient_penalty(interpolates)
+            elif self.mode_ == 'time':
+                _, d_fk = self.disc(tms_fk)
+                tape.watch(d_fk)
+                pre_out, d_tr = self.disc(tms_tr)
+                tape.watch(d_tr)
+                interpolates = tms_tr + alpha * (tms_fk - tms_tr)  # (batch, out_seq_len, time_features)
+                gp = self.gradient_penalty(interpolates)
+            else:  # self.mode_ == 'comb'
+                _, d_fk = self.disc((chs_fk, tms_fk))
+                tape.watch(d_fk)
+                pre_out, d_tr = self.disc((chs_tr, tms_tr))
+                tape.watch(d_tr)
+                gp_ch = self.gradient_penalty(chs_tr + alpha * (chs_fk - chs_tr))
+                gp_tm = self.gradient_penalty(tms_tr + alpha * (tms_fk - tms_tr))
+                gp = (gp_ch + gp_tm) / tf.constant(2, dtype=tf.float32)  # todo: use a better weight for ch and tm!!!
+
+            wloss_disc = tf.math.reduce_mean(d_fk, axis=-1) - tf.math.reduce_mean(d_tr, axis=-1) +\
+                         self.LAMBDA * gp  # (batch)
+            gradients_disc = tape.gradient(wloss_disc, self.disc.trainable_variables)
+            """
+            with tf.GradientTape() as tape:
+                chs_fk, tms_fk = gan_model.gen_fake(ch_ltnt, tm_ltnt)
+                _, d_fk = gan_model.disc(chs_fk)  # (batch, 1)
+                tape.watch(d_fk)
+                pre_out, d_tr = gan_model.disc(chs_tr)  # (batch, 1)
+                tape.watch(d_tr)
+                gp = gradient_penalty(chs_tr, chs_fk)
+                wloss_disc = tf.math.reduce_mean(d_fk, axis=-1) - tf.math.reduce_mean(d_tr, axis=-1) + LAMBDA * gp  # must be (16, 16)
+                gradients_disc = tape.gradient(wloss_disc, gan_model.disc.trainable_variables)
+            
+            """
+            self.optimizer_disc.apply_gradients(zip(gradients_disc, self.disc.trainable_variables))
+            self.train_loss_disc(wloss_disc)
+
+        # Step 2: freeze discriminator and use the fake sample with true label to train generator ---------------
         with tf.GradientTape() as tape:
-            loss_gen, variables_gen = self.train_generator(ch_ltnt2, tm_ltnt2)
-            gradients_gen = tape.gradient(loss_gen, variables_gen)
+            util.model_trainable(self.disc, trainable=False)  # freeze discriminator
+            # chs_fk2: (batch * 2, out_seq_len, embed_dim)
+            # tms_fk2: (batch * 2, out_seq_len, time_features)
+            chs_fk2, tms_fk2 = self.gen_fake(ch_ltnt2, tm_ltnt2)
+            if self.mode_ == 'chords':
+                d_inputs = chs_fk2
+            elif self.mode_ == 'time':
+                d_inputs = tms_fk2
+            else:  # self.mode_ == 'comb'
+                d_inputs = chs_fk2, tms_fk2
+            _, d_fk2 = self.disc(d_inputs)  # (batch, 1)
+            wloss_gen = -tf.reduce_mean(d_fk2, axis=-1)  # (batch * 2)
+            variables_gen = []
+            if self.mode_ != 'time':
+                if self.train_chords_style:
+                    variables_gen += self.chords_style.trainable_variables
+                if self.train_chords_syn:
+                    variables_gen += self.chords_syn.trainable_variables
+            if self.mode_ != 'chords':
+                if self.train_time_style:
+                    variables_gen += self.time_style.trainable_variables
+                if self.train_time_syn:
+                    variables_gen += self.time_syn.trainable_variables
+            gradients_gen = tape.gradient(wloss_gen, variables_gen)
             self.optimizer_gen.apply_gradients(zip(gradients_gen, variables_gen))
-            self.train_loss_gen(loss_gen)
+            self.train_loss_gen(wloss_gen)
 
-        return loss_disc_tr, loss_disc_fk, loss_gen, pre_out
+        return wloss_disc, wloss_gen, pre_out  # loss_disc_tr, loss_disc_fk, loss_gen, pre_out
 
     def train(self, epochs=10, save_model_step=1, save_sample_step=1,
               print_batch=True, print_batch_step=10, print_epoch=True, print_epoch_step=5, disc_lr=0.0001, gen_lr=0.1,
               optmzr=lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9),
-              g_loss_func=tf.keras.losses.KLDivergence(), d_loss_func=tf.keras.losses.KLDivergence(),
-              result_path=result_path, out_seq_len=64, save_nsamples=3,
-              true_label_smooth=(0.9, 1.0), fake_label_smooth=(0.0, 0.1), recycle_step=2):
+              result_path=result_path, out_seq_len=64, save_nsamples=3, recycle_step=2, LAMBDA=10):
 
         assert save_nsamples <= self.batch_size
         self.out_seq_len = out_seq_len
@@ -301,13 +300,9 @@ class GAN(tf.keras.models.Model):
         self.train_loss_gen = tf.keras.metrics.Mean(name='train_loss_gen')
         self.optimizer_disc = optmzr(disc_lr)
         self.train_loss_disc = tf.keras.metrics.Mean(name='train_loss_disc')
-        self.true_label_smooth = true_label_smooth
-        self.fake_label_smooth = fake_label_smooth
-        self.g_loss_func = g_loss_func
-        self.d_loss_func = d_loss_func
+        self.LAMBDA = LAMBDA
 
         pre_out = None
-
         # ---------------------- training --------------------------
         for epoch in range(epochs):
             self.train_loss_disc.reset_states()
@@ -349,15 +344,15 @@ class GAN(tf.keras.models.Model):
                 tm_ltnt2 = tf.random.normal((self.batch_size * 2, self.in_dim),
                                             mean=0, stddev=self.latent_std, dtype=tf.float32)
 
-                loss_disc_tr, loss_disc_fk, loss_gen, pre_out = self.train_step(
+                # loss_disc_tr, loss_disc_fk, loss_gen, pre_out = self.train_step(
+                #     (ch_ltnt, tm_ltnt, ch_ltnt2, tm_ltnt2, chs_tr, tms_tr), to_recycle=to_recycle)
+                wloss_disc, wloss_gen, pre_out = self.train_step(
                     (ch_ltnt, tm_ltnt, ch_ltnt2, tm_ltnt2, chs_tr, tms_tr), to_recycle=to_recycle)
 
                 if print_batch:
                     if (i + 1) % print_batch_step == 0:
-                        print('Epoch {} Batch {}: gen_loss={:.4f}; disc_fake_loss={:.4f}, '
-                              'disc_true_loss={:.4f};'.format(
-                            epoch + 1, i + 1, loss_gen.numpy().mean(), loss_disc_fk.numpy().mean(),
-                            loss_disc_tr.numpy().mean()))
+                        print('Epoch {} Batch {}: gen_loss={:.4f}; disc_loss={:.4f}'.format(
+                            epoch + 1, i + 1, wloss_gen.numpy().mean(), wloss_disc.numpy().mean()))
 
                 # temporary -------------
                 if (i + 1) % 100 == 0:

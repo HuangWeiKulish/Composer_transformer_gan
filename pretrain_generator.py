@@ -56,12 +56,11 @@ optmzr = lambda lr: tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.98, epsilo
 max_to_keep = 5
 
 
-def wasserstein_loss(y_true, y_pred):
-    return tf.keras.backend.mean(y_true * y_pred)
+# negative quantity between -1 and 0,
+# where 0 indicates orthogonality and values closer to -1 indicate greater similarity
+loss_func = tf.keras.losses.cosine_similarity
 
-
-loss_func = wasserstein_loss  # tf.keras.losses.KLDivergence()
-
+# set check point
 ckpts_ch = tf.train.Checkpoint(model=chords_syn, optimizer=optmzr(learning_rate))
 ckpt_managers_ch = tf.train.CheckpointManager(ckpts_ch, model_paths['chords_syn'], max_to_keep=max_to_keep)
 if ckpt_managers_ch.latest_checkpoint:
@@ -69,13 +68,13 @@ if ckpt_managers_ch.latest_checkpoint:
     print('restored')
 
 
+# functions
 def ch2vec(ch_ary):
     # ch_ary: (batch, embed_dim)
     embeddings = [[embedder.wv[ch_i.numpy().decode('UTF-8')].tolist() for ch_i in ch_ary] for ch_ary in ch_ary]
     return embeddings
 
 
-# functions
 def pred_output_ch(x_in_emb, out_seq_len, chords_syn, return_str=False):
     # x_in_emb: (batch, seq_len, embed_dim)
     x_de = tf.ones((x_in_emb.shape[0], 1, embed_dim))  # (batch, 1, embed_dim)
@@ -107,7 +106,7 @@ def pretrain_ch(true_data, optmzr, epochs, print_batch_step=10, print_epoch_step
                 optmzr.apply_gradients(zip(gradients, variables_chords))
                 train_loss(loss_chords)
             if (i + 1) % print_batch_step == 0:
-                print('Epoch {} Batch {}: loss={:.4f}'.format(epoch + 1, i + 1, loss_chords.numpy()))
+                print('Epoch {} Batch {}: loss={:.4f}'.format(epoch + 1, i + 1, loss_chords.numpy().mean()))
         if (epoch + 1) % print_epoch_step == 0:
             print('Epoch {}: Loss = {:.4f}, Time used = {:.4f}'.format(
                 epoch + 1, train_loss.result(), time.time() - start))
@@ -117,7 +116,7 @@ def pretrain_ch(true_data, optmzr, epochs, print_batch_step=10, print_epoch_step
 
 
 # pretrain
-pretrain_ch(true_data, optmzr(learning_rate), epochs=100, print_batch_step=100, print_epoch_step=1, save_model_step=1)
+pretrain_ch(true_data, optmzr(learning_rate), epochs=100, print_batch_step=5000, print_epoch_step=1, save_model_step=1)
 
 
 # -------------------------- pretrain time syn --------------------------

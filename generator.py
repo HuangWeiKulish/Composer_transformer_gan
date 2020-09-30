@@ -28,7 +28,7 @@ class Mapping(tf.keras.models.Model):
         super(Mapping, self).__init__()
         self.fcs = tf.keras.models.Sequential(
             [tf.keras.models.Sequential([tf.keras.layers.Dense(1, activation=activ),
-                                         tf.keras.layers.GaussianNoise(0.3),
+                                         #tf.keras.layers.GaussianNoise(0.3),
                                          #tf.keras.layers.Dropout(dropout_rate),
                                          tf.keras.layers.BatchNormalization(
                                              momentum=0.99, epsilon=0.001, center=True, scale=True,

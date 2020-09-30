@@ -1,12 +1,6 @@
 import numpy as np
-import itertools
-import os
 import tensorflow as tf
-from tensorflow.keras.models import load_model
 import preprocess
-
-tf.keras.backend.set_floatx('float32')
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
 def padding_mask(x_):
@@ -17,20 +11,6 @@ def padding_mask(x_):
 
 def lookahead_mask(seq_len):
     return 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
-
-
-# def softargmax(x, beta=1e10):
-#     x = tf.convert_to_tensor(x)
-#     x_range = tf.range(x.shape.as_list()[-1], dtype=x.dtype)
-#     return tf.reduce_sum(tf.nn.softmax(x*beta) * x_range, axis=-1)
-#
-#
-# def number_encode_text(x, tk, vel_norm=64.0, tmps_norm=0.12, dur_norm=1.3):
-#     # x: (batch, length, 4); 4 columns: [chords in text format, velocity, time since last start, chords duration]
-#     # ------------- encode chords from text to integer --------------
-#     x_0 = tk.texts_to_sequences(x[:, :, 0].tolist())
-#     return np.append(np.expand_dims(x_0, axis=-1) - 1,  # ..- 1 because tk index starts from 1
-#                      np.divide(x[:, :, 1:], np.array([vel_norm, tmps_norm, dur_norm])), axis=-1).astype(np.float32)
 
 
 def load_true_data_pretrain_gen(
@@ -69,22 +49,6 @@ class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
         arg1 = tf.math.rsqrt(step)
         arg2 = step * (self.warmup_steps ** -1.5)
         return tf.math.rsqrt(self.embed_dim) * tf.math.minimum(arg1, arg2)
-
-#
-# @tf.function
-# def loss_func_chords(real, pred):
-#     cross_entropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
-#     mask = tf.math.logical_not(tf.math.equal(real, 0))
-#     mask = tf.cast(mask, dtype=tf.float32)
-#     loss_ = cross_entropy(real, pred)
-#     loss_ *= mask  # (batch, out_seq_len)
-#     return tf.reduce_sum(loss_) / tf.reduce_sum(mask)  # scalar
-
-
-@tf.function
-def loss_func_time(real, pred):
-    loss_ = tf.keras.losses.MSE(real, pred)
-    return tf.reduce_sum(loss_) / (real.shape[0] * real.shape[1])
 
 
 def model_trainable(model, trainable=True):
